@@ -1,0 +1,14 @@
+[package]
+name = "rust_xpath"
+version = "0.1.0"
+authors = ["Mazdak Farrokhzad <twingoow@gmail.com>"]
+
+[dependencies.nom]
+version  = "^2.0"
+#features = ["verbose-errors"]
+
+[dependencies.phf_macros]
+version  = "0.7.20"
+
+[dependencies.phf]
+version  = "0.7.20"
