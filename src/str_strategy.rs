@@ -68,8 +68,8 @@ pub struct HashSetStrategy<I> {
 }
 
 impl<I: AsRef<str>> HashSetStrategy<I> {
-    fn store(&self) -> &HashSet<BS> {
-        unsafe { self.store.get().as_ref().unwrap() }
+    fn store(&self) -> &mut HashSet<BS> {
+        unsafe { self.store.get().as_mut().unwrap() }
     }
 
     /// The len() of the owned hash set.
@@ -112,7 +112,7 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
          * thus the &'a str returned always points to a valid memory location.
          * Therefore, this will never cause memory unsafety.
          */
-        let si = unsafe { self.store.get().as_mut().unwrap() };
+        let si = self.store();
 
         // TODO: Replace with entry API if and when HashSet:s get them.
         if !si.contains(i) {
@@ -235,6 +235,7 @@ fn str_strategy_hashset() {
         let s1 = "hello";
         let s2 = "world";
         let i1 = ss.0.inject_str(s1);
+        ss.0.store().reserve(1);
         let i2 = ss.0.inject_str(s2);
         let i3 = ss.0.inject_str(s2);
         (i1, i2, i3)
