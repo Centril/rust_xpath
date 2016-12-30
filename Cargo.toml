@@ -1,13 +1,15 @@
 [package]
-name = "rust_xpath"
-version = "0.1.0"
-authors = ["Mazdak Farrokhzad <twingoow@gmail.com>"]
+name          = "rust_xpath"
+version       = "0.1.0"
+authors       = ["Mazdak Farrokhzad <twingoow@gmail.com>"]
+license       = "MIT/Apache-2.0"
+description   = "A Rust XML XPath library"
+readme        = "README.md"
+keywords      = ["xml", "xpath"]
+repository    = "https://github.com/Centril/rust_xpath"
+#documentation = "https://docs.rs/rust_xpath/"
 
-[dependencies.nom]
-version  = "^2.0"
-
-[dependencies.phf_macros]
-version  = "0.7.20"
-
-[dependencies.phf]
-version  = "0.7.20"
+[dependencies]
+nom  = "2.0.0"
+phf         = "0.7.20"
+phf_macros  = "0.7.20"
