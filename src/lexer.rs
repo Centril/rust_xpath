@@ -43,34 +43,20 @@ impl error::Error for LexerError {
     fn description(&self) -> &str {
         use self::LexerError::*;
         match *self {
-            ExpectedQuote =>
-                "expected a single or double quote",
-            MismatchedQuoteCharacters =>
-                "mismatched quote character",
-            ExpectedNumber =>
-                "expected a number",
-            ExpectedCurrentNode =>
-                "Expected the current node token",
-            ExpectedNamedOperator =>
-                "expected a named operator",
-            ExpectedAxis =>
-                "expected an axis name",
-            ExpectedAxisSeparator =>
-                "expected an axis separator",
-            ExpectedNodeTest =>
-                "expected a node test",
-            ExpectedQName =>
-                "expected an optionally prefixed name",
-            ExpectedNameTest =>
-                "expected a name test",
-            ExpectedVariableReference =>
-                "expected a variable reference",
-            ExpectedToken =>
-                "expected a token",
-            ExpectedLeftParenthesis =>
-                "expected a left parenthesis",
-            UnableToCreateToken =>
-                "unable to create token",
+            ExpectedQuote => "expected a single or double quote",
+            MismatchedQuoteCharacters => "mismatched quote character",
+            ExpectedNumber => "expected a number",
+            ExpectedCurrentNode => "Expected the current node token",
+            ExpectedNamedOperator => "expected a named operator",
+            ExpectedAxis => "expected an axis name",
+            ExpectedAxisSeparator => "expected an axis separator",
+            ExpectedNodeTest => "expected a node test",
+            ExpectedQName => "expected an optionally prefixed name",
+            ExpectedNameTest => "expected a name test",
+            ExpectedVariableReference => "expected a variable reference",
+            ExpectedToken => "expected a token",
+            ExpectedLeftParenthesis => "expected a left parenthesis",
+            UnableToCreateToken => "unable to create token",
         }
     }
 }
@@ -87,9 +73,9 @@ use self::LexerError::*;
 // Lexer type:
 //============================================================================//
 
-type In<'a>   = &'a str;
-type Tok<'a>  = Token<In<'a>>;
-type OIn<'a>  = Option<In<'a>>;
+type In<'a> = &'a str;
+type Tok<'a> = Token<In<'a>>;
+type OIn<'a> = Option<In<'a>>;
 type OTok<'a> = Option<Tok<'a>>;
 
 pub type LexResult<'a> = Result<Tok<'a>, LexerError>;
@@ -174,17 +160,24 @@ fn get_two(i: In) -> OTok<'static> {
 
 par!(star, In, tag!("*"));
 
-lexer!(lex_single,       ExpectedToken,         map_opt!(take!(1), get_single));
-lexer!(lex_two,          ExpectedToken,         map_opt!(take!(2), get_two));
-lexer!(lex_current_node, ExpectedCurrentNode,   vtag!(Const(CurrentNode), "."));
-lexer!(lex_named_op,     ExpectedNamedOperator, map!(
-    alt_complete!(value!(Multiply, star)
-                | vtag!(Or,        "or")
-                | vtag!(And,       "and")
-                | vtag!(Remainder, "mod")
-                | vtag!(Divide,    "div")),
-    Const
-));
+lexer!(lex_single, ExpectedToken, map_opt!(take!(1), get_single));
+lexer!(lex_two, ExpectedToken, map_opt!(take!(2), get_two));
+lexer!(
+    lex_current_node,
+    ExpectedCurrentNode,
+    vtag!(Const(CurrentNode), ".")
+);
+lexer!(
+    lex_named_op,
+    ExpectedNamedOperator,
+    map!(
+        alt_complete!(
+            value!(Multiply, star) | vtag!(Or, "or") | vtag!(And, "and") |
+                vtag!(Remainder, "mod") | vtag!(Divide, "div")
+        ),
+        Const
+    )
+);
 
 //============================================================================//
 // Number:
@@ -194,15 +187,20 @@ lexer!(lex_named_op,     ExpectedNamedOperator, map!(
 [30]    Number                          ::= Digits ('.' Digits?)? | '.' Digits
 [31]    Digits                          ::= [0-9]+
 */
-lexer!(lex_number, ExpectedNumber, map!(
-    recognize!(alt!(terminated!(tag!("."), digit)
-                  | terminated!(digit, opt!(terminated!(
-                        complete!(tag!(".")),
-                        opt!(complete!(digit))
-                    )))
-                )),
-    |s: In| Number(s.parse().unwrap())
-));
+lexer!(
+    lex_number,
+    ExpectedNumber,
+    map!(
+        recognize!(alt!(
+            terminated!(tag!("."), digit) |
+                terminated!(
+                    digit,
+                    opt!(terminated!(complete!(tag!(".")), opt!(complete!(digit))))
+                )
+        )),
+        |s: In| Number(s.parse().unwrap())
+    )
+);
 
 //============================================================================//
 // Literal:
@@ -221,35 +219,47 @@ macro_rules! quoted_by {
 // Axis specifier:
 //============================================================================//
 
-lexer!(lex_axis_spec, map!(terminated!(
-    lerr!(ExpectedAxis, alt_complete!(
-          vtag!(Child,            "child")
-        | vtag!(Parent,           "parent")
-        | vtag!(SelfAxis,         "self")
-        | vtag!(Namespace,        "namespace")
-        | vtag!(Attribute,        "attribute")
-        | vtag!(AncestorOrSelf,   "ancestor-or-self")
-        | vtag!(Ancestor,         "ancestor")
-        | vtag!(DescendantOrSelf, "descendant-or-self")
-        | vtag!(Descendant,       "descendant")
-        | vtag!(FollowingSibling, "following-sibling")
-        | vtag!(Following,        "following")
-        | vtag!(PrecedingSibling, "preceding-sibling")
-        | vtag!(Preceding,        "preceding"))),
-    lerr!(ExpectedAxisSeparator, tag!("::"))), Axis
-));
+lexer!(
+    lex_axis_spec,
+    map!(
+        terminated!(
+            lerr!(
+                ExpectedAxis,
+                alt_complete!(
+                    vtag!(Child, "child") | vtag!(Parent, "parent") | vtag!(SelfAxis, "self") |
+                        vtag!(Namespace, "namespace") |
+                        vtag!(Attribute, "attribute") |
+                        vtag!(AncestorOrSelf, "ancestor-or-self") |
+                        vtag!(Ancestor, "ancestor") |
+                        vtag!(DescendantOrSelf, "descendant-or-self") |
+                        vtag!(Descendant, "descendant") |
+                        vtag!(FollowingSibling, "following-sibling") |
+                        vtag!(Following, "following") |
+                        vtag!(PrecedingSibling, "preceding-sibling") |
+                        vtag!(Preceding, "preceding")
+                )
+            ),
+            lerr!(ExpectedAxisSeparator, tag!("::"))
+        ),
+        Axis
+    )
+);
 
 //============================================================================//
 // Node type:
 //============================================================================//
 
-lexer!(lex_node_type, ExpectedNodeTest, map!(
-    alt_complete!(vtag!(Text,    "text")
-                | vtag!(Node,    "node")
-                | vtag!(Comment, "comment")
-                | vtag!(ProcIns, "processing-instruction")),
-    NType
-));
+lexer!(
+    lex_node_type,
+    ExpectedNodeTest,
+    map!(
+        alt_complete!(
+            vtag!(Text, "text") | vtag!(Node, "node") | vtag!(Comment, "comment") |
+                vtag!(ProcIns, "processing-instruction")
+        ),
+        NType
+    )
+);
 
 /*
 //============================================================================//
@@ -268,73 +278,87 @@ NCName         ::= NameStartChar (NameChar)*
 
 fn is_name_char_start(c: char) -> bool {
     match c {
-          'A'         ... 'Z'
-        | '_'         ... '_'
-        | 'a'         ... 'z'
-        | '\u{C0}'    ... '\u{D6}'
-        | '\u{D8}'    ... '\u{F6}'
-        | '\u{F8}'    ... '\u{2FF}'
-        | '\u{370}'   ... '\u{37D}'
-        | '\u{37F}'   ... '\u{1FFF}'
-        | '\u{200C}'  ... '\u{200D}'
-        | '\u{2070}'  ... '\u{218F}'
-        | '\u{2C00}'  ... '\u{2FEF}'
-        | '\u{3001}'  ... '\u{D7FF}'
-        | '\u{F900}'  ... '\u{FDCF}'
-        | '\u{FDF0}'  ... '\u{FFFD}'
-        | '\u{10000}' ... '\u{EFFFF}' => true,
-        _                             => false
+        'A'...'Z' |
+        '_'...'_' |
+        'a'...'z' |
+        '\u{C0}'...'\u{D6}' |
+        '\u{D8}'...'\u{F6}' |
+        '\u{F8}'...'\u{2FF}' |
+        '\u{370}'...'\u{37D}' |
+        '\u{37F}'...'\u{1FFF}' |
+        '\u{200C}'...'\u{200D}' |
+        '\u{2070}'...'\u{218F}' |
+        '\u{2C00}'...'\u{2FEF}' |
+        '\u{3001}'...'\u{D7FF}' |
+        '\u{F900}'...'\u{FDCF}' |
+        '\u{FDF0}'...'\u{FFFD}' |
+        '\u{10000}'...'\u{EFFFF}' => true,
+        _ => false,
     }
 }
 
 fn is_name_char(c: char) -> bool {
-    is_name_char_start(c) ||
-    match c {
-          '-'        ... '-'
-        | '.'        ... '.'
-        | '0'        ... '9'
-        | '\u{B7}'   ... '\u{B7}'
-        | '\u{300}'  ... '\u{36F}'
-        | '\u{203F}' ... '\u{2040}' => true,
-        _                           => false
+    is_name_char_start(c) || match c {
+        '-'...'-' |
+        '.'...'.' |
+        '0'...'9' |
+        '\u{B7}'...'\u{B7}' |
+        '\u{300}'...'\u{36F}' |
+        '\u{203F}'...'\u{2040}' => true,
+        _ => false,
     }
 }
 
 fn name_char_start<'a>(i: In<'a>) -> IResult<In<'a>, In<'a>> {
-    map_opt!(i, take!(1), |s: In<'a>|
-        s.chars().next()
-         .and_then(|c| if is_name_char_start(c) { Some(s) } else { None })
-    )
+    map_opt!(i, take!(1), |s: In<'a>| {
+        s.chars()
+            .next()
+            .and_then(|c| if is_name_char_start(c) { Some(s) } else { None })
+    })
 }
 
-par!(nc_name, In,
+par!(
+    nc_name,
+    In,
     recognize!(preceded!(name_char_start, take_while_s!(is_name_char)))
 );
-par!(prefix,     OIn, opt!(terminated!(nc_name, complete!(tag!(":")))));
-par!(local_part, OIn, alt_complete!(value!(None, star) | map!(nc_name, Some)));
+par!(
+    prefix,
+    OIn,
+    opt!(terminated!(nc_name, complete!(tag!(":"))))
+);
+par!(
+    local_part,
+    OIn,
+    alt_complete!(value!(None, star) | map!(nc_name, Some))
+);
 
-lexer!(lex_name_test, ExpectedNameTest, map!(
-    pair!(prefix, local_part),
-    |p| match p {
-        (None,     None)     => Wildcard,
-        (Some(ns), None)     => NSWildcard(ns),
-        (None,     Some(lp)) => LocalPart(lp),
+lexer!(
+    lex_name_test,
+    ExpectedNameTest,
+    map!(pair!(prefix, local_part), |p| match p {
+        (None, None) => Wildcard,
+        (Some(ns), None) => NSWildcard(ns),
+        (None, Some(lp)) => LocalPart(lp),
         (Some(ns), Some(lp)) => NSLocalPart(ns, lp),
-    }
-));
-    //NTest(NameTest(ns, ln)))
+    })
+);
+//NTest(NameTest(ns, ln)))
 
 //============================================================================//
 // Function:
 //============================================================================//
 
-lexer!(lex_function, map!(
-    terminated!(
-        lerr!(ExpectedQName, qname),
-        lerr!(ExpectedLeftParenthesis, complete!(peek!(tag!("("))))
-    ),
-    FnName
-));
+lexer!(
+    lex_function,
+    map!(
+        terminated!(
+            lerr!(ExpectedQName, qname),
+            lerr!(ExpectedLeftParenthesis, complete!(peek!(tag!("("))))
+        ),
+        FnName
+    )
+);
 
 //============================================================================//
 // VariableReference:
@@ -379,7 +403,7 @@ impl<'a> Lexer<'a> {
     pub fn new<'b>(src: In<'b>) -> Lexer<'b> {
         Lexer {
             remains: src,
-            prefer_op_names: false
+            prefer_op_names: false,
         }
     }
 
@@ -391,19 +415,16 @@ impl<'a> Lexer<'a> {
         match lexer_tok(self.remains, self.prefer_op_names) {
             Done(rem, tok) => {
                 self.remains = rem;
-                if tok.precedes_node_test()  ||
-                   tok.precedes_expression() ||
-                   tok.is_operator() {
+                if tok.precedes_node_test() || tok.precedes_expression() || tok.is_operator() {
                     self.prefer_op_names = false;
                 } else {
                     // See http://www.w3.org/TR/xpath/#exprlex
                     self.prefer_op_names = true;
                 }
                 Ok(tok)
-            },
-            Error(ErrorKind::Custom(MismatchedQuoteCharacters))
-                => Err(MismatchedQuoteCharacters),
-            _   => Err(UnableToCreateToken)
+            }
+            Error(ErrorKind::Custom(MismatchedQuoteCharacters)) => Err(MismatchedQuoteCharacters),
+            _ => Err(UnableToCreateToken),
         }
     }
 }
@@ -412,7 +433,11 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = LexResult<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.is_finished() { None } else { Some(self.next_token()) }
+        if self.is_finished() {
+            None
+        } else {
+            Some(self.next_token())
+        }
     }
 }
 
@@ -424,21 +449,23 @@ impl<'a> Iterator for Lexer<'a> {
 enum ExpansionState {
     // Finite State Machine(s):
     // Transitions: DA => DB => DC => None
-    DA, DB, DC,
+    DA,
+    DB,
+    DC,
     // Transitions: NA => None
-    NA
+    NA,
 }
 
 pub struct LexerDeabbreviator<I> {
     source: I,
-    state:  Option<ExpansionState>
+    state: Option<ExpansionState>,
 }
 
 impl<I> LexerDeabbreviator<I> {
     pub fn new(source: I) -> LexerDeabbreviator<I> {
         LexerDeabbreviator {
             source: source,
-            state:  None
+            state: None,
         }
     }
 
@@ -448,35 +475,37 @@ impl<I> LexerDeabbreviator<I> {
             Const(DoubleSlash) => {
                 self.state = Some(DA);
                 Const(Slash)
-            },
+            }
             Const(CurrentNode) => {
                 self.state = Some(NA);
                 Axis(SelfAxis)
-            },
-            Const(ParentNode)  => {
+            }
+            Const(ParentNode) => {
                 self.state = Some(NA);
                 Axis(Parent)
-            },
-            Const(AtSign)      => Axis(Attribute),
-            other              => other
+            }
+            Const(AtSign) => Axis(Attribute),
+            other => other,
         }
     }
 }
 
 impl<'a, I> Iterator for LexerDeabbreviator<I>
-where I: Iterator<Item = LexResult<'a>> {
+where
+    I: Iterator<Item = LexResult<'a>>,
+{
     type Item = LexResult<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         use self::ExpansionState::*;
         match self.state {
-            None    => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
+            None => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
             Some(p) => {
                 let (ns, r) = match p {
-                    NA => (None,     NType(Node)),
+                    NA => (None, NType(Node)),
                     DA => (Some(DB), Axis(DescendantOrSelf)),
                     DB => (Some(DC), NType(Node)),
-                    DC => (None,     Const(Slash)),
+                    DC => (None, Const(Slash)),
                 };
                 self.state = ns;
                 Some(Ok(r))
@@ -572,7 +601,9 @@ mod tests {
 
     mod consts {
         use super::*;
-        fn c<'a>(ct: CToken) -> VTok<'a> { vec![Const(ct)] }
+        fn c<'a>(ct: CToken) -> VTok<'a> {
+            vec![Const(ct)]
+        }
         tests! {
            // single
              (single_slash,  "/") => c(Slash)
@@ -601,7 +632,9 @@ mod tests {
 
     mod axis {
         use super::*;
-        fn a<'a>(an: AxisName) -> VTok<'a> { vec![Axis(an)] }
+        fn a<'a>(an: AxisName) -> VTok<'a> {
+            vec![Axis(an)]
+        }
         tests! {
               (axis_self,          "self::")               => a(SelfAxis)
             , (child,              "child::")              => a(Child)
@@ -625,7 +658,9 @@ mod tests {
 
     mod number {
         use super::*;
-        fn n<'a>(x: f64) -> VTok<'a> { vec![Number(x)] }
+        fn n<'a>(x: f64) -> VTok<'a> {
+            vec![Number(x)]
+        }
         tests! {
               (integral_number,                 "42")    => n(42.0)
             , (integral_number_dot,             "42.")   => n(42.0)
@@ -636,7 +671,9 @@ mod tests {
 
     mod literal {
         use super::*;
-        fn l<'a>(lit: In<'a>) -> VTok<'a> { vec![Literal(lit)] }
+        fn l<'a>(lit: In<'a>) -> VTok<'a> {
+            vec![Literal(lit)]
+        }
         tests! {
               (apostrophe_literal,   "'hello!'") => l("hello!")
             , (double_quote_literal, "\"1.23\"") => l("1.23")
@@ -747,6 +784,5 @@ mod tests {
         }
     }
 
-    mod compound {
-    }
+    mod compound {}
 }

@@ -31,14 +31,14 @@ fn bs_new<S: AsRef<str>>(s: S) -> BS {
 /// Provides a specific way to inject things [representable] as a [string slice]
 /// as another form [representable] as a [string slice]. This provides
 /// opportunities for caching, etc., when [interior mutability] is used.
-/// 
+///
 /// [representable]: https://doc.rust-lang.org/std/convert/trait.AsRef.html
 /// [string slice]: https://doc.rust-lang.org/std/primitive.str.html
 /// [interior mutability]: https://doc.rust-lang.org/std/cell
 pub trait StrStrategy<'a> {
     /// The type of inputs, representable as a string slice,
     /// that the strategy accepts.
-    type Input:  AsRef<str>;
+    type Input: AsRef<str>;
 
     /// The type of outputs, representable as a string slice,
     /// that the strategy yields when used.
@@ -64,7 +64,7 @@ pub trait StrStrategy<'a> {
 /// [`StrStrategy`]: trait.StrStrategy.html
 pub struct HashSetStrategy<I> {
     store: UnsafeCell<HashSet<BS>>,
-    ph:    PhantomData<I>
+    ph: PhantomData<I>,
 }
 
 impl<I: AsRef<str>> HashSetStrategy<I> {
@@ -87,7 +87,7 @@ impl<I> Default for HashSetStrategy<I> {
     fn default() -> Self {
         HashSetStrategy {
             store: UnsafeCell::new(HashSet::new()),
-            ph:    PhantomData,
+            ph: PhantomData,
         }
     }
 }
@@ -99,13 +99,13 @@ impl<I> fmt::Debug for HashSetStrategy<I> {
 }
 
 impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
-    type Input  = I;
+    type Input = I;
     type Output = &'a str;
 
     /// Allocates the given input in the cache and yields a reference to it.
     fn inject_str(&'a self, input: Self::Input) -> Self::Output {
-        let i  = input.as_ref();
-        /* 
+        let i = input.as_ref();
+        /*
          * This is safe because nothing is ever removed from the HashSet,
          * and when it grows (length == capacity), Box<str> may be moved,
          * but the heap allocated contents are never deallocated,
@@ -146,7 +146,7 @@ impl<I> fmt::Debug for BoxStrategy<I> {
 
 impl<'a, I: AsRef<str>> StrStrategy<'a> for BoxStrategy<I> {
     type Output = Box<str>;
-    type Input  = I;
+    type Input = I;
 
     /// Allocates the input on the heap and just returns that box.
     fn inject_str(&'a self, input: Self::Input) -> Self::Output {
@@ -181,7 +181,7 @@ impl<I> fmt::Debug for StringStrategy<I> {
 
 impl<'a, I: AsRef<str>> StrStrategy<'a> for StringStrategy<I> {
     type Output = String;
-    type Input  = I;
+    type Input = I;
 
     /// Allocates the input on the heap as a [`String`] and just returns it.
     /// [`String`]: https://doc.rust-lang.org/nightly/collections/string/struct.String.html
@@ -216,7 +216,7 @@ impl fmt::Debug for RefStrategy {
 
 impl<'a> StrStrategy<'a> for RefStrategy {
     type Output = &'a str;
-    type Input  = &'a str;
+    type Input = &'a str;
 
     /// Returns the given input back.
     fn inject_str(&'a self, input: Self::Input) -> Self::Output {

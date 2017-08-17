@@ -4,19 +4,19 @@
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum AxisName {
-    Ancestor,           // ancestor::
-    AncestorOrSelf,     // ancestor-or-self::
-    Attribute,          // attribute::
-    Child,              // child::
-    Descendant,         // descendant::
-    DescendantOrSelf,   // descendant-or-self::
-    Following,          // following-sibling::
-    FollowingSibling,   // following::
-    Namespace,          // namespace::
-    Parent,             // parent::
-    Preceding,          // preceding::
-    PrecedingSibling,   // preceding-sibling::
-    SelfAxis,           // self::
+    Ancestor,         // ancestor::
+    AncestorOrSelf,   // ancestor-or-self::
+    Attribute,        // attribute::
+    Child,            // child::
+    Descendant,       // descendant::
+    DescendantOrSelf, // descendant-or-self::
+    Following,        // following-sibling::
+    FollowingSibling, // following::
+    Namespace,        // namespace::
+    Parent,           // parent::
+    Preceding,        // preceding::
+    PrecedingSibling, // preceding-sibling::
+    SelfAxis,         // self::
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -24,7 +24,7 @@ pub enum NodeType {
     Comment,
     Node,
     Text,
-    ProcIns
+    ProcIns,
 }
 
 //#[derive(PartialEq, Clone, Debug)]
@@ -87,41 +87,36 @@ use self::Token::*;
 impl<S: AsRef<str>> Token<S> {
     pub fn precedes_node_test(&self) -> bool {
         match *self {
-              Const(CToken::AtSign)
-            | Axis(..)
-              => true,
+            Const(CToken::AtSign) | Axis(..) => true,
             _ => false,
         }
     }
 
     pub fn precedes_expression(&self) -> bool {
         match *self {
-              Const(CToken::LeftParen)
-            | Const(CToken::LeftBracket)
-              => true,
+            Const(CToken::LeftParen) | Const(CToken::LeftBracket) => true,
             _ => false,
         }
     }
 
-    pub fn is_operator(& self) -> bool {
+    pub fn is_operator(&self) -> bool {
         match *self {
-              Const(CToken::Slash)
-            | Const(CToken::DoubleSlash)
-            | Const(CToken::PlusSign)
-            | Const(CToken::MinusSign)
-            | Const(CToken::Pipe)
-            | Const(CToken::Equal)
-            | Const(CToken::NotEqual)
-            | Const(CToken::LessThan)
-            | Const(CToken::LessThanOrEqual)
-            | Const(CToken::GreaterThan)
-            | Const(CToken::GreaterThanOrEqual)
-            | Const(CToken::And)
-            | Const(CToken::Or)
-            | Const(CToken::Remainder)
-            | Const(CToken::Divide)
-            | Const(CToken::Multiply)
-              => true,
+            Const(CToken::Slash) |
+            Const(CToken::DoubleSlash) |
+            Const(CToken::PlusSign) |
+            Const(CToken::MinusSign) |
+            Const(CToken::Pipe) |
+            Const(CToken::Equal) |
+            Const(CToken::NotEqual) |
+            Const(CToken::LessThan) |
+            Const(CToken::LessThanOrEqual) |
+            Const(CToken::GreaterThan) |
+            Const(CToken::GreaterThanOrEqual) |
+            Const(CToken::And) |
+            Const(CToken::Or) |
+            Const(CToken::Remainder) |
+            Const(CToken::Divide) |
+            Const(CToken::Multiply) => true,
             _ => false,
         }
     }

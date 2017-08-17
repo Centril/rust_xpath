@@ -15,21 +15,23 @@ use super::tokens::Token::*;
 enum ExpansionState {
     // Finite State Machine(s):
     // Transitions: DA => DB => DC => None
-    DA, DB, DC,
+    DA,
+    DB,
+    DC,
     // Transitions: NA => None
-    NA
+    NA,
 }
 
 pub struct LexerDeabbreviator<I> {
     source: I,
-    state:  Option<ExpansionState>
+    state: Option<ExpansionState>,
 }
 
 impl<I> LexerDeabbreviator<I> {
     pub fn new(source: I) -> LexerDeabbreviator<I> {
         LexerDeabbreviator {
             source: source,
-            state:  None
+            state: None,
         }
     }
 
@@ -39,35 +41,37 @@ impl<I> LexerDeabbreviator<I> {
             Const(DoubleSlash) => {
                 self.state = Some(DA);
                 Const(Slash)
-            },
+            }
             Const(CurrentNode) => {
                 self.state = Some(NA);
                 Axis(SelfAxis)
-            },
-            Const(ParentNode)  => {
+            }
+            Const(ParentNode) => {
                 self.state = Some(NA);
                 Axis(Parent)
-            },
-            Const(AtSign)      => Axis(Attribute),
-            other              => other
+            }
+            Const(AtSign) => Axis(Attribute),
+            other => other,
         }
     }
 }
 
 impl<'a, I> Iterator for LexerDeabbreviator<I>
-where I: Iterator<Item = LexResult<'a>> {
+where
+    I: Iterator<Item = LexResult<'a>>,
+{
     type Item = LexResult<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         use self::ExpansionState::*;
         match self.state {
-            None    => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
+            None => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
             Some(p) => {
                 let (ns, r) = match p {
-                    NA => (None,     NType(Node)),
+                    NA => (None, NType(Node)),
                     DA => (Some(DB), Axis(DescendantOrSelf)),
                     DB => (Some(DC), NType(Node)),
-                    DC => (None,     Const(Slash)),
+                    DC => (None, Const(Slash)),
                 };
                 self.state = ns;
                 Some(Ok(r))
@@ -88,7 +92,8 @@ mod tests {
 
     fn all_tokens(i: Vec<LexResult>) -> Vec<Token<&str>> {
         LexerDeabbreviator::new(i.into_iter())
-            .collect::<Result<Vec<_>, LexerError>>().unwrap()
+            .collect::<Result<Vec<_>, LexerError>>()
+            .unwrap()
     }
 
     macro_rules! tests {
@@ -106,13 +111,15 @@ mod tests {
 
     #[bench]
     fn bench_deabbr(b: &mut test::Bencher) {
-        let x = "./..//Wikimedia/.././projects//project[@text='abc'][@name='Wikipedia']//editions//edition//text()";
+        let x = concat!(
+            "./..//Wikimedia/.././projects//project[@text='abc']",
+            "[@name='Wikipedia']//editions//edition//text()"
+        );
         let l: Vec<LexResult> = Lexer::new(x).collect();
         b.iter(|| LexerDeabbreviator::new(l.clone().into_iter()).count());
     }
 
     // actual tests:
-
     tests! {
         (at_sign_to_attribute_axis, vec![Ok(Const(AtSign))])
             => vec![Axis(Attribute)],
