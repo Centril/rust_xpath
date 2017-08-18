@@ -4,13 +4,15 @@
 //!
 //! + cache it in a set, [`HashSetStrategy`]
 //! + box it in the heap, [`BoxStrategy`]
+//! + box it in the heap as a String, [`StringStrategy`]
 //! + just return the slice, [`RefStrategy`]
 //!
 //! [generic way]: trait.StrStrategy.html
 //! [can be represented]: https://doc.rust-lang.org/std/convert/trait.AsRef.html
 //! [string slice]: https://doc.rust-lang.org/std/primitive.str.html
 //! [`HashSetStrategy`]: struct.HashSetStrategy.html
-//! [`BoxStrategy`]: struct.BoxStrategy.html
+//! [`BoxStrategy`]: struct.BoxStrategy.html`
+//! [`StringStrategy`]: struct.StringStrategy.html
 //! [`RefStrategy`]: struct.RefStrategy.html
 
 use std::marker::PhantomData;
@@ -20,6 +22,8 @@ use std::cell::UnsafeCell;
 
 type BS = Box<str>;
 
+/// Takes something representable as a string slice and creates an owned
+/// `Box<str>` out of it.
 fn bs_new<S: AsRef<str>>(s: S) -> BS {
     s.as_ref().to_owned().into_boxed_str()
 }
@@ -61,18 +65,33 @@ pub trait StrStrategy<'a> {
 /// A caching [`StrStrategy`] using the heap.
 /// Identical strings are only allocated once.
 ///
+/// The strategy is internally backed by a [`HashSet`]
+/// which is never removed from.
+///
 /// [`StrStrategy`]: trait.StrStrategy.html
+/// [`HashSet`]: https://doc.rust-lang.org/std/collections/struct.HashSet.html
 pub struct HashSetStrategy<I> {
     store: UnsafeCell<HashSet<BS>>,
     ph: PhantomData<I>,
 }
 
 impl<I: AsRef<str>> HashSetStrategy<I> {
-    fn store(&self) -> &mut HashSet<BS> {
-        unsafe { self.store.get().as_mut().unwrap() }
+    #[allow(unknown_lints)]
+    #[allow(mut_from_ref)]
+    unsafe fn store_mut(&self) -> &mut HashSet<BS> {
+        self.store.get().as_mut().unwrap()
     }
 
-    /// The len() of the owned hash set.
+    fn store(&self) -> &HashSet<BS> {
+        unsafe { self.store.get().as_ref().unwrap() }
+    }
+
+    /// The value of is_empty() on the owned hash set.
+    pub fn is_empty(&self) -> bool {
+        self.store().is_empty()
+    }
+
+    /// The value of len() of the owned hash set.
     pub fn len(&self) -> usize {
         self.store().len()
     }
@@ -92,9 +111,9 @@ impl<I> Default for HashSetStrategy<I> {
     }
 }
 
-impl<I> fmt::Debug for HashSetStrategy<I> {
+impl<I: AsRef<str>> fmt::Debug for HashSetStrategy<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", unsafe { self.store.get().as_ref().unwrap() })
+        write!(f, "{:?}", self.store())
     }
 }
 
@@ -105,6 +124,7 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
     /// Allocates the given input in the cache and yields a reference to it.
     fn inject_str(&'a self, input: Self::Input) -> Self::Output {
         let i = input.as_ref();
+
         /*
          * This is safe because nothing is ever removed from the HashSet,
          * and when it grows (length == capacity), Box<str> may be moved,
@@ -112,7 +132,7 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
          * thus the &'a str returned always points to a valid memory location.
          * Therefore, this will never cause memory unsafety.
          */
-        let si = self.store();
+        let si = unsafe { self.store_mut() };
 
         // TODO: Replace with entry API if and when HashSet:s get them.
         if !si.contains(i) {
@@ -155,7 +175,7 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for BoxStrategy<I> {
 }
 
 //============================================================================//
-// BoxStrategy
+// StringStrategy
 //============================================================================//
 
 /// A [`StrStrategy`] that simply allocates using [`String`].
@@ -235,7 +255,10 @@ fn str_strategy_hashset() {
         let s1 = "hello";
         let s2 = "world";
         let i1 = ss.0.inject_str(s1);
-        ss.0.store().reserve(1);
+        // Force reallocation. We do this to ensure that addresses are stable.
+        unsafe {
+            ss.0.store_mut().reserve(1);
+        }
         let i2 = ss.0.inject_str(s2);
         let i3 = ss.0.inject_str(s2);
         (i1, i2, i3)
