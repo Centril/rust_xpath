@@ -81,7 +81,7 @@ type OIn<'a> = Option<In<'a>>;
 type OTok<'a> = Option<Tok<'a>>;
 
 /// The result of running the lexer on some input.
-pub type LexResult<'a> = Result<Tok<'a>, Error>;
+pub type LexerResult<'a> = Result<Tok<'a>, Error>;
 
 pub struct Lexer<'a> {
     remains: In<'a>,
@@ -452,7 +452,7 @@ impl<'a> Lexer<'a> {
 
     /// Produces the next available lexeme / token, if any,
     /// and advances the remaining input.
-    fn next_token(&mut self) -> LexResult<'a> {
+    fn next_token(&mut self) -> LexerResult<'a> {
         match lexer_tok(self.remains, self.prefer_op_names) {
             Done(rem, tok) => {
                 self.remains = rem;
@@ -468,7 +468,7 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = LexResult<'a>;
+    type Item = LexerResult<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_finished() {

@@ -65,9 +65,9 @@ impl<I> LexerDeabbreviator<I> {
 
 impl<'a, I> Iterator for LexerDeabbreviator<I>
 where
-    I: Iterator<Item = LexResult<'a>>,
+    I: Iterator<Item = LexerResult<'a>>,
 {
-    type Item = LexResult<'a>;
+    type Item = LexerResult<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         use self::ExpansionState::*;
@@ -94,7 +94,7 @@ mod tests {
 
     // helpers & macros:
 
-    fn all_tokens(i: Vec<LexResult>) -> Vec<Token<&str>> {
+    fn all_tokens(i: Vec<LexerResult>) -> Vec<Token<&str>> {
         LexerDeabbreviator::new(i.into_iter())
             .collect::<Result<Vec<_>, LexerError>>()
             .unwrap()
@@ -119,7 +119,7 @@ mod tests {
             "./..//Wikimedia/.././projects//project[@text='abc']",
             "[@name='Wikipedia']//editions//edition//text()"
         );
-        let l: Vec<LexResult> = Lexer::new(x).collect();
+        let l: Vec<LexerResult> = Lexer::new(x).collect();
         b.iter(|| LexerDeabbreviator::new(l.clone().into_iter()).count());
     }
 
