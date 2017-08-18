@@ -136,6 +136,40 @@ pub struct MasterExpr<
     expr: Expr<P::Output, S::Output, L::Output>,
 }
 
+
+/// Tokens for the Core Function Library,
+/// See: https://www.w3.org/TR/xpath/#corelib
+#[derive(PartialEq, Clone, Debug)]
+pub enum CoreFunction {
+    Last,
+    Position,
+    Count,
+    Id,
+    LocalName,
+    NamespaceUri,
+    Name,
+    String,
+    Concat,
+    StartsWith,
+    Contains,
+    SubstringBefore,
+    SubstringAfter,
+    Substring,
+    StringLength,
+    NormalizeSpace,
+    Translate,
+    Boolean,
+    Not,
+    True,
+    False,
+    Lang,
+    Number,
+    Sum,
+    Floor,
+    Ceiling,
+    Round,
+}
+
 #[test]
 fn expr_size_of() {
     use std::mem::size_of;
@@ -187,6 +221,7 @@ fn expr_size_of() {
     );
 }
 
+/*
 #[test]
 fn expr_boxed() {
     use str_strategy::StrStrategy;
@@ -217,3 +252,4 @@ fn expr_boxed() {
     use std;
     std::mem::drop(me)
 }
+*/
