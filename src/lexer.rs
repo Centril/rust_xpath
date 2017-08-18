@@ -22,7 +22,7 @@ use super::tokens::Token::*;
 quick_error! {
     /// Indicates that an error occurred in the lexing phase of parsing.
     #[derive(PartialEq, Debug, Clone)]
-    pub enum LexerError {
+    pub enum Error {
         ExpectedQuote {
             description("expected a single or double quote")
         }
@@ -68,7 +68,7 @@ quick_error! {
     }
 }
 
-use self::LexerError::*;
+use self::Error::*;
 
 //============================================================================//
 // Lexer type:
@@ -81,7 +81,7 @@ type OIn<'a> = Option<In<'a>>;
 type OTok<'a> = Option<Tok<'a>>;
 
 /// The result of running the lexer on some input.
-pub type LexResult<'a> = Result<Tok<'a>, LexerError>;
+pub type LexResult<'a> = Result<Tok<'a>, Error>;
 
 pub struct Lexer<'a> {
     remains: In<'a>,
@@ -97,20 +97,20 @@ macro_rules! vtag {
     ($i: expr, $v: expr, $t: expr) => ( value!($i, $v, tag!($t)) );
 }
 
-/// Fixes the error to the variant of `LexerError` specified.
+/// Fixes the error to the variant of `Error` specified.
 macro_rules! lerr {
     ($i: expr, $err: expr, $($args:tt)*) => (
         add_return_error!($i, ErrorKind::Custom($err),
-            fix_error!(LexerError, $($args)*))
+            fix_error!(Error, $($args)*))
     );
 }
 
 /// Prevents backtracking in the child parser and fixes the error
-/// to the variant of `LexerError` specified.
+/// to the variant of `Error` specified.
 macro_rules! rlerr {
     ($i: expr, $err: expr, $($args:tt)*) => (
         return_error!($i, ErrorKind::Custom($err),
-            fix_error!(LexerError, $($args)*))
+            fix_error!(Error, $($args)*))
     );
 }
 
@@ -130,7 +130,7 @@ macro_rules! lexer {
         lexer!($name, lerr!($err, $($args)*));
     );
     ($name:ident, $($args:tt)*) => (
-        named!($name<In, Tok, LexerError>, $($args)*);
+        named!($name<In, Tok, Error>, $($args)*);
     );
 }
 
@@ -412,10 +412,10 @@ lexer!(lex_varref, map!(
 // All:
 //============================================================================//
 
-named!(whitespace<In, In, LexerError>, eat_separator!(" \t\r\n"));
+named!(whitespace<In, In, Error>, eat_separator!(" \t\r\n"));
 
 /// Lexes a single token given input and whether to prefer operator names or not.
-fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, LexerError> {
+fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, Error> {
     #![allow(unused_variables)]
     #![allow(unknown_lints)]
     #![allow(cyclomatic_complexity)]
@@ -497,7 +497,7 @@ mod tests {
     }
 
     /// Lexes the input completely into a vector.
-    fn all_tokens_raw(i: In) -> Result<VTok, LexerError> {
+    fn all_tokens_raw(i: In) -> Result<VTok, Error> {
         Lexer::new(i).collect()
     }
 
