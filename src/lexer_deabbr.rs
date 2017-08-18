@@ -11,45 +11,52 @@ use super::tokens::Token::*;
 // Deabbriviator:
 //============================================================================//
 
+/// Tracks the state when deabbreviating.
 #[derive(Clone, Copy)]
 enum ExpansionState {
     // Finite State Machine(s):
-    // Transitions: DA => DB => DC => None
+    /// Transitions: DA => DB => DC => NE
     DA,
     DB,
     DC,
-    // Transitions: NA => None
+    /// Transitions: NA => NE
     NA,
+    /// Not expanding
+    NE,
+}
+
+macro_rules! expand {
+    ($self: expr, $next: expr, $yield: expr) => {
+        { $self.state = $next; $yield }
+    }
+}
+
+macro_rules! transition {
+    ($self: expr, $s: expr, $r: expr) => {
+        { $self.state = $s; Some(Ok($r))
+        }
+    }
 }
 
 pub struct LexerDeabbreviator<I> {
     source: I,
-    state: Option<ExpansionState>,
+    state: ExpansionState,
 }
 
 impl<I> LexerDeabbreviator<I> {
     pub fn new(source: I) -> LexerDeabbreviator<I> {
         LexerDeabbreviator {
             source: source,
-            state: None,
+            state: ExpansionState::NE,
         }
     }
 
     fn expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
         use self::ExpansionState::*;
         match tok {
-            Const(DoubleSlash) => {
-                self.state = Some(DA);
-                Const(Slash)
-            }
-            Const(CurrentNode) => {
-                self.state = Some(NA);
-                Axis(SelfAxis)
-            }
-            Const(ParentNode) => {
-                self.state = Some(NA);
-                Axis(Parent)
-            }
+            Const(DoubleSlash) => expand!(self, DA, Const(Slash)),
+            Const(CurrentNode) => expand!(self, NA, Axis(SelfAxis)),
+            Const(ParentNode) => expand!(self, NA, Axis(Parent)),
             Const(AtSign) => Axis(Attribute),
             other => other,
         }
@@ -65,17 +72,14 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         use self::ExpansionState::*;
         match self.state {
-            None => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
-            Some(p) => {
-                let (ns, r) = match p {
-                    NA => (None, NType(Node)),
-                    DA => (Some(DB), Axis(DescendantOrSelf)),
-                    DB => (Some(DC), NType(Node)),
-                    DC => (None, Const(Slash)),
-                };
-                self.state = ns;
-                Some(Ok(r))
-            }
+            // No expansion state:
+            NE => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
+            // NA expansion FSM:
+            NA => transition!(self, NE, NType(Node)),
+            // DA expansion FSM:
+            DA => transition!(self, DB, Axis(DescendantOrSelf)),
+            DB => transition!(self, DC, NType(Node)),
+            DC => transition!(self, NE, Const(Slash)),
         }
     }
 }

@@ -11,9 +11,13 @@ extern crate phf;
 #[macro_use]
 extern crate nom;
 
+#[macro_use]
+extern crate quick_error;
+
 extern crate test;
 
 mod tokens;
+
 mod lexer;
 mod lexer_deabbr;
 

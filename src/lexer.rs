@@ -2,9 +2,6 @@
 // Imports:
 //============================================================================//
 
-// std:
-use std::{error, fmt};
-
 use phf;
 
 use nom::*;
@@ -15,55 +12,59 @@ use super::tokens::*;
 use super::tokens::CToken::*;
 use super::tokens::AxisName::*;
 use super::tokens::NodeType::*;
+//use super::tokens::NameTest::*;
 use super::tokens::Token::*;
 
 //============================================================================//
 // Errors
 //============================================================================//
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum LexerError {
-    ExpectedQuote,
-    MismatchedQuoteCharacters,
-    ExpectedNumber,
-    ExpectedCurrentNode,
-    ExpectedNamedOperator,
-    ExpectedAxis,
-    ExpectedAxisSeparator,
-    ExpectedNodeTest,
-    ExpectedQName,
-    ExpectedNameTest,
-    ExpectedVariableReference,
-    ExpectedToken,
-    ExpectedLeftParenthesis,
-    UnableToCreateToken,
-}
-
-impl error::Error for LexerError {
-    fn description(&self) -> &str {
-        use self::LexerError::*;
-        match *self {
-            ExpectedQuote => "expected a single or double quote",
-            MismatchedQuoteCharacters => "mismatched quote character",
-            ExpectedNumber => "expected a number",
-            ExpectedCurrentNode => "Expected the current node token",
-            ExpectedNamedOperator => "expected a named operator",
-            ExpectedAxis => "expected an axis name",
-            ExpectedAxisSeparator => "expected an axis separator",
-            ExpectedNodeTest => "expected a node test",
-            ExpectedQName => "expected an optionally prefixed name",
-            ExpectedNameTest => "expected a name test",
-            ExpectedVariableReference => "expected a variable reference",
-            ExpectedToken => "expected a token",
-            ExpectedLeftParenthesis => "expected a left parenthesis",
-            UnableToCreateToken => "unable to create token",
+quick_error! {
+    /// Indicates that an error occurred in the lexing phase of parsing.
+    #[derive(PartialEq, Debug, Clone)]
+    pub enum LexerError {
+        ExpectedQuote {
+            description("expected a single or double quote")
         }
-    }
-}
-
-impl fmt::Display for LexerError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        error::Error::description(self).fmt(fmt)
+        MismatchedQuoteCharacters {
+            description("mismatched quote character")
+        }
+        ExpectedNumber {
+            description("expected a number")
+        }
+        ExpectedCurrentNode {
+            description("expected the current node token")
+        }
+        ExpectedNamedOperator {
+            description("expected a named operator")
+        }
+        ExpectedAxis {
+            description("expected an axis name")
+        }
+        ExpectedAxisSeparator {
+            description("expected an axis separator")
+        }
+        ExpectedNodeTest {
+            description("expected a node test")
+        }
+        ExpectedQName {
+            description("expected an optionally prefixed name")
+        }
+        ExpectedNameTest {
+            description("expected a name test")
+        }
+        ExpectedVariableReference {
+            description("expected a variable reference")
+        }
+        ExpectedToken {
+            description("expected a token")
+        }
+        ExpectedLeftParenthesis {
+            description("expected a left parenthesis")
+        }
+        UnableToCreateToken {
+            description("unable to create token")
+        }
     }
 }
 
@@ -73,11 +74,13 @@ use self::LexerError::*;
 // Lexer type:
 //============================================================================//
 
+// Various type aliases for brevity.
 type In<'a> = &'a str;
 type Tok<'a> = Token<In<'a>>;
 type OIn<'a> = Option<In<'a>>;
 type OTok<'a> = Option<Tok<'a>>;
 
+/// The result of running the lexer on some input.
 pub type LexResult<'a> = Result<Tok<'a>, LexerError>;
 
 pub struct Lexer<'a> {
@@ -89,10 +92,12 @@ pub struct Lexer<'a> {
 // Lexing macros:
 //============================================================================//
 
+/// Produce the first argument if the second matches.
 macro_rules! vtag {
     ($i: expr, $v: expr, $t: expr) => ( value!($i, $v, tag!($t)) );
 }
 
+/// Fixes the error to the variant of `LexerError` specified.
 macro_rules! lerr {
     ($i: expr, $err: expr, $($args:tt)*) => (
         add_return_error!($i, ErrorKind::Custom($err),
@@ -100,6 +105,8 @@ macro_rules! lerr {
     );
 }
 
+/// Prevents backtracking in the child parser and fixes the error
+/// to the variant of `LexerError` specified.
 macro_rules! rlerr {
     ($i: expr, $err: expr, $($args:tt)*) => (
         return_error!($i, ErrorKind::Custom($err),
@@ -107,12 +114,17 @@ macro_rules! rlerr {
     );
 }
 
+/// Creates a named parser with input type `In` and output type according
+/// to the second argument.
 macro_rules! par {
     ($name:ident, $t: ty, $($args:tt)*) => (
         named!($name(In) -> $t, $($args)*);
     );
 }
 
+/// Creates a lexer for an entire category.
+/// It is named as the first argument with potential
+/// error specified in the second argument.
 macro_rules! lexer {
     ($name:ident, $err: expr, $($args:tt)*) => (
         lexer!($name, lerr!($err, $($args)*));
@@ -126,6 +138,7 @@ macro_rules! lexer {
 // Const tokens:
 //============================================================================//
 
+/// A map of all single character tokens.
 static SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     "/" => Slash,
     "(" => LeftParen,
@@ -142,6 +155,7 @@ static SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     "," => Comma
 };
 
+// A map of all two character tokens.
 static TWO_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     "<=" => LessThanOrEqual,
     ">=" => GreaterThanOrEqual,
@@ -150,23 +164,34 @@ static TWO_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     ".." => ParentNode,
 };
 
+/// Matches the input against any symbol in `SINGLE_CHAR_TOKENS`.
 fn get_single(i: In) -> OTok<'static> {
     SINGLE_CHAR_TOKENS.get(i).cloned().map(Const)
 }
 
+/// Matches the input against any symbol in `TWO_CHAR_TOKENS`.
 fn get_two(i: In) -> OTok<'static> {
     TWO_CHAR_TOKENS.get(i).cloned().map(Const)
 }
 
+/// A lexer matching a star (*) symbol.
 par!(star, In, tag!("*"));
 
+/// A lexer matching a single character token.
 lexer!(lex_single, ExpectedToken, map_opt!(take!(1), get_single));
+
+/// A lexer matching a two character token.
 lexer!(lex_two, ExpectedToken, map_opt!(take!(2), get_two));
+
+/// A lexer matching a dot (.) symbol and producing a `CurrentNode` token.
 lexer!(
     lex_current_node,
     ExpectedCurrentNode,
     vtag!(Const(CurrentNode), ".")
 );
+
+/// A lexer matching any of
+/// { "or" => Or, "and" => And, "mod" => Remainder, "div" => Divide }.
 lexer!(
     lex_named_op,
     ExpectedNamedOperator,
@@ -187,6 +212,7 @@ lexer!(
 [30]    Number                          ::= Digits ('.' Digits?)? | '.' Digits
 [31]    Digits                          ::= [0-9]+
 */
+/// A lexer matching a number (both integer and floating point).
 lexer!(
     lex_number,
     ExpectedNumber,
@@ -206,6 +232,7 @@ lexer!(
 // Literal:
 //============================================================================//
 
+/// A lexer matching a quoted literal string.
 macro_rules! quoted_by {
     ($i: expr, $del: expr) => (
         preceded!($i,
@@ -219,6 +246,7 @@ macro_rules! quoted_by {
 // Axis specifier:
 //============================================================================//
 
+/// A lexer matching any axis specifier followed by "::".
 lexer!(
     lex_axis_spec,
     map!(
@@ -249,6 +277,7 @@ lexer!(
 // Node type:
 //============================================================================//
 
+// A lexer matching any node type.
 lexer!(
     lex_node_type,
     ExpectedNodeTest,
@@ -261,11 +290,11 @@ lexer!(
     )
 );
 
-/*
 //============================================================================//
 // Name test:
 //============================================================================//
 
+/*
 NameStartChar  ::= [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6]
                  | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF]
                  | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF]
@@ -317,38 +346,39 @@ fn name_char_start<'a>(i: In<'a>) -> IResult<In<'a>, In<'a>> {
     })
 }
 
+/// A lexer matching an NCName.
 par!(
     nc_name,
     In,
     recognize!(preceded!(name_char_start, take_while_s!(is_name_char)))
 );
+
+/// A lexer matching a prefix.
 par!(
     prefix,
     OIn,
     opt!(terminated!(nc_name, complete!(tag!(":"))))
 );
+
+/// A lexer matching a local part.
 par!(
     local_part,
     OIn,
     alt_complete!(value!(None, star) | map!(nc_name, Some))
 );
 
+/// A lexer matching a name test.
 lexer!(
     lex_name_test,
     ExpectedNameTest,
-    map!(pair!(prefix, local_part), |p| match p {
-        (None, None) => Wildcard,
-        (Some(ns), None) => NSWildcard(ns),
-        (None, Some(lp)) => LocalPart(lp),
-        (Some(ns), Some(lp)) => NSLocalPart(ns, lp),
-    })
+    map!(pair!(prefix, local_part), |(ns, lp)| NTest(NameTest(ns, lp)))
 );
-//NTest(NameTest(ns, ln)))
 
 //============================================================================//
 // Function:
 //============================================================================//
 
+/// A lexer matching a function name.
 lexer!(
     lex_function,
     map!(
@@ -364,8 +394,10 @@ lexer!(
 // VariableReference:
 //============================================================================//
 
+/// A lexer matching a QName.
 par!(qname, QName<In>, do_parse!(a: prefix >> b: nc_name >> (QName(a, b))));
 
+// A lexer matching a variable reference.
 lexer!(lex_varref, map!(
     preceded!(
         lerr!(ExpectedVariableReference, tag!("$")),
@@ -380,8 +412,11 @@ lexer!(lex_varref, map!(
 
 named!(whitespace<In, In, LexerError>, eat_separator!(" \t\r\n"));
 
+/// Lexes a single token given input and whether to prefer operator names or not.
 fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, LexerError> {
     #![allow(unused_variables)]
+    #![allow(unknown_lints)]
+    #![allow(cyclomatic_complexity)]
     delimited!(i,
         whitespace,
         alt!(alt_complete!(lex_two | lex_single)
@@ -400,27 +435,28 @@ fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, LexerError> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new<'b>(src: In<'b>) -> Lexer<'b> {
+    /// Constructs a new lexer for the given input string slice.
+    pub fn new(src: In) -> Lexer {
         Lexer {
             remains: src,
             prefer_op_names: false,
         }
     }
 
+    /// Yields true if nothing remains to be lexed.
     pub fn is_finished(&self) -> bool {
         self.remains.is_empty()
     }
 
+    /// Produces the next available lexeme / token, if any,
+    /// and advances the remaining input.
     fn next_token(&mut self) -> LexResult<'a> {
         match lexer_tok(self.remains, self.prefer_op_names) {
             Done(rem, tok) => {
                 self.remains = rem;
-                if tok.precedes_node_test() || tok.precedes_expression() || tok.is_operator() {
-                    self.prefer_op_names = false;
-                } else {
-                    // See http://www.w3.org/TR/xpath/#exprlex
-                    self.prefer_op_names = true;
-                }
+                // See http://www.w3.org/TR/xpath/#exprlex
+                self.prefer_op_names =
+                    !(tok.precedes_node_test() || tok.precedes_expression() || tok.is_operator());
                 Ok(tok)
             }
             Error(ErrorKind::Custom(MismatchedQuoteCharacters)) => Err(MismatchedQuoteCharacters),
@@ -442,79 +478,6 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 //============================================================================//
-// Deabbriviator:
-//============================================================================//
-
-#[derive(Clone, Copy)]
-enum ExpansionState {
-    // Finite State Machine(s):
-    // Transitions: DA => DB => DC => None
-    DA,
-    DB,
-    DC,
-    // Transitions: NA => None
-    NA,
-}
-
-pub struct LexerDeabbreviator<I> {
-    source: I,
-    state: Option<ExpansionState>,
-}
-
-impl<I> LexerDeabbreviator<I> {
-    pub fn new(source: I) -> LexerDeabbreviator<I> {
-        LexerDeabbreviator {
-            source: source,
-            state: None,
-        }
-    }
-
-    fn expand<'a>(&mut self, tok: Tok<'a>) -> Tok<'a> {
-        use self::ExpansionState::*;
-        match tok {
-            Const(DoubleSlash) => {
-                self.state = Some(DA);
-                Const(Slash)
-            }
-            Const(CurrentNode) => {
-                self.state = Some(NA);
-                Axis(SelfAxis)
-            }
-            Const(ParentNode) => {
-                self.state = Some(NA);
-                Axis(Parent)
-            }
-            Const(AtSign) => Axis(Attribute),
-            other => other,
-        }
-    }
-}
-
-impl<'a, I> Iterator for LexerDeabbreviator<I>
-where
-    I: Iterator<Item = LexResult<'a>>,
-{
-    type Item = LexResult<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use self::ExpansionState::*;
-        match self.state {
-            None => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
-            Some(p) => {
-                let (ns, r) = match p {
-                    NA => (None, NType(Node)),
-                    DA => (Some(DB), Axis(DescendantOrSelf)),
-                    DB => (Some(DC), NType(Node)),
-                    DC => (None, Const(Slash)),
-                };
-                self.state = ns;
-                Some(Ok(r))
-            }
-        }
-    }
-}
-
-//============================================================================//
 // Tests:
 //============================================================================//
 
@@ -531,14 +494,17 @@ mod tests {
         panic!("parser did not complete, because:\n{:?}\n", x);
     }
 
+    /// Lexes the input completely into a vector.
     fn all_tokens_raw(i: In) -> Result<VTok, LexerError> {
         Lexer::new(i).collect()
     }
 
+    /// Lexes the input completely and ensures the lexer did not error.
     fn all_tokens(i: In) -> VTok {
         all_tokens_raw(i).unwrap_or_else(|e| no_complete(e))
     }
 
+    /// Macro for writing lexer tests.
     macro_rules! tests {
         (($name: ident, $inp: expr) => $res: expr) => {
             #[test]
@@ -558,6 +524,7 @@ mod tests {
         Const(RightParen)
     }
 
+    /// Fuses together a token and subsequent vector of tokens into a vector.
     fn pars<'a>(first: Tok<'a>, args: VTok<'a>) -> VTok<'a> {
         let mut cont = vec![first, lpar()];
         cont.extend(args);
@@ -565,33 +532,30 @@ mod tests {
         cont
     }
 
-    /*
+    /// Creates a NameTest token out of the namespace/prefix and local part.
     fn ntest<'a>(ns: OIn<'a>, lp: OIn<'a>) -> Tok<'a> {
         NTest(NameTest(ns, lp))
     }
-    */
 
     fn lp(lp: In) -> Tok {
-        LocalPart(lp)
-        //ntest(None, Some(lp))
+        ntest(None, Some(lp))
     }
 
     fn q_lp<'a>(ns: In<'a>, lp: In<'a>) -> Tok<'a> {
-        NSLocalPart(ns, lp)
-        //ntest(Some(ns), Some(lp))
+        ntest(Some(ns), Some(lp))
     }
 
     fn wc<'a>() -> Tok<'a> {
-        Wildcard
-        //ntest(None, None)
+        ntest(None, None)
     }
 
     fn q_wc<'a>(ns: In<'a>) -> Tok<'a> {
-        NSWildcard(ns)
-        //ntest(Some(ns), None)
+        ntest(Some(ns), None)
     }
 
+    //============================================================================//
     // Actual tests:
+    //============================================================================//
 
     tests! {
         (empty_string_has_no_tokens, "") => vec![],
@@ -599,6 +563,7 @@ mod tests {
             => vec![Const(AtSign); 3]
     }
 
+    /// Tests for the Const producing lexers.
     mod consts {
         use super::*;
         fn c<'a>(ct: CToken) -> VTok<'a> {
@@ -630,6 +595,7 @@ mod tests {
         }
     }
 
+    /// Tests for the axis lexer.
     mod axis {
         use super::*;
         fn a<'a>(an: AxisName) -> VTok<'a> {
@@ -656,6 +622,7 @@ mod tests {
         }
     }
 
+    /// Test for the the number lexer.
     mod number {
         use super::*;
         fn n<'a>(x: f64) -> VTok<'a> {
@@ -669,6 +636,7 @@ mod tests {
         }
     }
 
+    /// Tests for the string literal lexer.
     mod literal {
         use super::*;
         fn l<'a>(lit: In<'a>) -> VTok<'a> {
@@ -680,6 +648,7 @@ mod tests {
         }
     }
 
+    /// Tests for the function application lexer.
     mod function {
         use super::*;
 
@@ -697,6 +666,7 @@ mod tests {
         }
     }
 
+    /// Tests for the node type lexer.
     mod node_type {
         use super::*;
 
@@ -715,6 +685,7 @@ mod tests {
         }
     }
 
+    /// Tests for the variable reference lexer.
     mod var_ref {
         use super::*;
         tests! {
@@ -723,6 +694,7 @@ mod tests {
         }
     }
 
+    /// Tests for the name test lexer.
     mod name_test {
         use super::*;
         tests! {
@@ -749,6 +721,7 @@ mod tests {
         }
     }
 
+    /// Tests for the special rules of the lexer when it comes to operators.
     mod special {
         use super::*;
         tests! {
@@ -765,6 +738,7 @@ mod tests {
         }
     }
 
+    /// Tests for ensuring that error are produces in certain cases.
     mod execption_thrown {
         use super::*;
 

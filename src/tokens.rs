@@ -2,6 +2,7 @@
 // Token types:
 //============================================================================//
 
+/// Models `[6] AxisName`.
 #[derive(PartialEq, Clone, Debug)]
 pub enum AxisName {
     Ancestor,         // ancestor::
@@ -19,6 +20,7 @@ pub enum AxisName {
     SelfAxis,         // self::
 }
 
+/// Models `[38] NodeType`.
 #[derive(PartialEq, Clone, Debug)]
 pub enum NodeType {
     Comment,
@@ -27,12 +29,17 @@ pub enum NodeType {
     ProcIns,
 }
 
-//#[derive(PartialEq, Clone, Debug)]
-//pub struct NameTest<S: AsRef<str>>(pub Option<S>, pub Option<S>);
+/// Models `[37] NameTest`.
+#[derive(PartialEq, Clone, Debug)]
+pub struct NameTest<S: AsRef<str>>(pub Option<S>, pub Option<S>);
 
+/// Models a [`QName`].
+///
+/// [`QName`]: https://www.w3.org/TR/REC-xml-names/#ns-qualnames
 #[derive(PartialEq, Clone, Debug)]
 pub struct QName<S: AsRef<str>>(pub Option<S>, pub S);
 
+/// Models: Operator + ( + ) + | + [ + ] + . + .. + @ + ,
 #[derive(PartialEq, Clone, Debug)]
 pub enum CToken {
     And,                // and
@@ -61,30 +68,38 @@ pub enum CToken {
     Slash,              // /
 }
 
+/// Models the lexical structure of xpath, `[28] ExprToken`.
 #[derive(PartialEq, Clone, Debug)]
 pub enum Token<S: AsRef<str>> {
-    // Constants:
+    // All constants: Operators + what's left.
     Const(CToken),
+
+    /// An AxisName token.
     Axis(AxisName),
 
-    // NameTest:
-    Wildcard,
-    NSWildcard(S),
-    LocalPart(S),
-    NSLocalPart(S, S),
-    //NTest(NameTest<S>),
+    // A NameTest token.
+    NTest(NameTest<S>),
 
-    // Compound:
+    // A NodeType token.
     NType(NodeType),
+
+    /// A function name token.
     FnName(QName<S>),
+
+    /// A quoted literal token.
     Literal(S),
+
+    /// A number literal token.
     Number(f64),
+
+    /// A variable reference token.
     VarRef(QName<S>),
 }
 
 use self::Token::*;
 
 impl<S: AsRef<str>> Token<S> {
+    /// Yields true if token precedes a node test.
     pub fn precedes_node_test(&self) -> bool {
         match *self {
             Const(CToken::AtSign) | Axis(..) => true,
@@ -92,6 +107,8 @@ impl<S: AsRef<str>> Token<S> {
         }
     }
 
+    /// Yields true if this token precedes an expression, i.e: an expression
+    /// must come after this.
     pub fn precedes_expression(&self) -> bool {
         match *self {
             Const(CToken::LeftParen) | Const(CToken::LeftBracket) => true,
@@ -99,24 +116,28 @@ impl<S: AsRef<str>> Token<S> {
         }
     }
 
+    /// Yields true if the token is an operator token.
     pub fn is_operator(&self) -> bool {
         match *self {
-            Const(CToken::Slash) |
-            Const(CToken::DoubleSlash) |
-            Const(CToken::PlusSign) |
-            Const(CToken::MinusSign) |
-            Const(CToken::Pipe) |
-            Const(CToken::Equal) |
-            Const(CToken::NotEqual) |
-            Const(CToken::LessThan) |
-            Const(CToken::LessThanOrEqual) |
-            Const(CToken::GreaterThan) |
-            Const(CToken::GreaterThanOrEqual) |
-            Const(CToken::And) |
-            Const(CToken::Or) |
-            Const(CToken::Remainder) |
-            Const(CToken::Divide) |
-            Const(CToken::Multiply) => true,
+            Const(ref c) => match *c {
+                CToken::Slash |
+                CToken::DoubleSlash |
+                CToken::PlusSign |
+                CToken::MinusSign |
+                CToken::Pipe |
+                CToken::Equal |
+                CToken::NotEqual |
+                CToken::LessThan |
+                CToken::LessThanOrEqual |
+                CToken::GreaterThan |
+                CToken::GreaterThanOrEqual |
+                CToken::And |
+                CToken::Or |
+                CToken::Remainder |
+                CToken::Divide |
+                CToken::Multiply => true,
+                _ => false,
+            }
             _ => false,
         }
     }
@@ -130,7 +151,8 @@ fn size_of() {
     println!("size_of CToken:   \t {:?}", size_of::<CToken>());
     println!("size_of AxisName: \t {:?}", size_of::<AxisName>());
     println!("size_of NodeType: \t {:?}", size_of::<NodeType>());
-    //println!("size_of NameTest: \t {:?}", size_of::<NameTest<&str>>());
+    println!("size_of QName:    \t {:?}", size_of::<QName<&str>>());
+    println!("size_of NameTest: \t {:?}", size_of::<NameTest<&str>>());
     println!("size_of Token:    \t {:?}", size_of::<Token<&str>>());
 }
 */
