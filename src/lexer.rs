@@ -224,6 +224,8 @@ lexer!(
                     opt!(terminated!(complete!(tag!(".")), opt!(complete!(digit))))
                 )
         )),
+        // We are certain at this point that it will parse into a number,
+        // therefore it is safe to .unwrap().
         |s: In| Number(s.parse().unwrap())
     )
 );
