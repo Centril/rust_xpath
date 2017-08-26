@@ -1,9 +1,16 @@
 //============================================================================//
+// Imports:
+//============================================================================//
+
+use super::util::to_boxed_str;
+use self::Token::*;
+
+//============================================================================//
 // Token types:
 //============================================================================//
 
 /// Models `[6] AxisName`.
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum AxisName {
     Ancestor,         // ancestor::
     AncestorOrSelf,   // ancestor-or-self::
@@ -21,7 +28,7 @@ pub enum AxisName {
 }
 
 /// Models `[38] NodeType`.
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum NodeType {
     Comment,
     Node,
@@ -40,7 +47,7 @@ pub struct NameTest<S: AsRef<str>>(pub Option<S>, pub Option<S>);
 pub struct QName<S: AsRef<str>>(pub Option<S>, pub S);
 
 /// Models: Operator + ( + ) + | + [ + ] + . + .. + @ + ,
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum CToken {
     And,                // and
     AtSign,             // @
@@ -96,7 +103,9 @@ pub enum Token<S: AsRef<str>> {
     VarRef(QName<S>),
 }
 
-use self::Token::*;
+//============================================================================//
+// Implementations
+//============================================================================//
 
 impl<S: AsRef<str>> Token<S> {
     /// Yields true if token precedes a node test.
@@ -137,9 +146,97 @@ impl<S: AsRef<str>> Token<S> {
                 CToken::Divide |
                 CToken::Multiply => true,
                 _ => false,
-            }
+            },
             _ => false,
         }
+    }
+}
+
+impl<S: AsRef<str>> From<S> for QName<S> {
+    fn from(local_part: S) -> Self {
+        QName(None, local_part)
+    }
+}
+
+impl<S: AsRef<str>> From<S> for NameTest<S> {
+    fn from(local_part: S) -> Self {
+        NameTest(None, Some(local_part))
+    }
+}
+
+//============================================================================//
+// Functor API
+//============================================================================//
+
+impl<S: AsRef<str>> NameTest<S> {
+    /// Applies a pure function mapping the string type of the NameTest.
+    pub fn map<F, T>(self, f: F) -> NameTest<T>
+    where
+        T: AsRef<str>,
+        F: Fn(S) -> T,
+    {
+        NameTest(self.0.map(&f), self.1.map(&f))
+    }
+}
+
+impl<S: AsRef<str>> QName<S> {
+    /// Applies a pure function mapping the string type of the QName.
+    pub fn map<F, T>(self, f: F) -> QName<T>
+    where
+        T: AsRef<str>,
+        F: Fn(S) -> T,
+    {
+        QName(self.0.map(&f), f(self.1))
+    }
+}
+
+impl<S: AsRef<str>> Token<S> {
+    /// Applies a pure function mapping the string type of the Token.
+    /// This is a covariant endofunctor in the sense that the category mapped
+    /// over is one with objects : AsRef<str>.
+    pub fn map<F, T>(self, f: F) -> Token<T>
+    where
+        T: AsRef<str>,
+        F: Fn(S) -> T,
+    {
+        match self {
+            Const(c) => Const(c),
+            Axis(a) => Axis(a),
+            NType(nt) => NType(nt),
+            Number(n) => Number(n),
+            NTest(nt) => NTest(nt.map(f)),
+            FnName(qn) => FnName(qn.map(f)),
+            Literal(l) => Literal(f(l)),
+            VarRef(qn) => VarRef(qn.map(f)),
+        }
+    }
+}
+
+//============================================================================//
+// Boxing Strings API
+//============================================================================//
+
+impl<S: AsRef<str>> NameTest<S> {
+    /// Produces a semantically equivalent NameTest using boxed strings instead
+    /// wherever applicable.
+    pub fn boxed_str(self) -> NameTest<Box<str>> {
+        self.map(to_boxed_str)
+    }
+}
+
+impl<S: AsRef<str>> QName<S> {
+    /// Produces a semantically equivalent QName using boxed strings instead
+    /// wherever applicable.
+    pub fn boxed_str(self) -> QName<Box<str>> {
+        self.map(to_boxed_str)
+    }
+}
+
+impl<S: AsRef<str>> Token<S> {
+    /// Produces a semantically equivalent token using boxed strings instead
+    /// wherever applicable.
+    pub fn boxed_str(self) -> Token<Box<str>> {
+        self.map(to_boxed_str)
     }
 }
 
