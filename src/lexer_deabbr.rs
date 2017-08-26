@@ -1,6 +1,9 @@
+//============================================================================//
+// Imports:
+//============================================================================//
+
 use super::lexer::*;
 
-// tokens:
 use super::tokens::*;
 use super::tokens::CToken::*;
 use super::tokens::AxisName::*;
@@ -8,57 +11,35 @@ use super::tokens::NodeType::*;
 use super::tokens::Token::*;
 
 //============================================================================//
-// Deabbriviator:
+// Public API, Types:
 //============================================================================//
 
-/// Tracks the state when deabbreviating.
-#[derive(Clone, Copy)]
-enum ExpansionState {
-    // Finite State Machine(s):
-    /// Transitions: DA => DB => DC => NE
-    DA,
-    DB,
-    DC,
-    /// Transitions: NA => NE
-    NA,
-    /// Not expanding
-    NE,
-}
-
-macro_rules! expand {
-    ($self: expr, $next: expr, $yield: expr) => {
-        { $self.state = $next; $yield }
-    }
-}
-
-macro_rules! transition {
-    ($self: expr, $s: expr, $r: expr) => {
-        { $self.state = $s; Some(Ok($r))
-        }
-    }
-}
-
+/// `LexerDeabbreviator` deabbreviates the token stream from the lexer,
+/// producing a smaller token language for the parser to deal with.
 pub struct LexerDeabbreviator<I> {
+    /// The source token stream.
     source: I,
+    /// Current expansion state.
     state: ExpansionState,
 }
 
+//============================================================================//
+// Public API, Implementation:
+//============================================================================//
+
 impl<I> LexerDeabbreviator<I> {
+    /// Constructs a new deabbreviator.
     pub fn new(source: I) -> LexerDeabbreviator<I> {
         LexerDeabbreviator {
             source: source,
             state: ExpansionState::NE,
         }
     }
+}
 
-    fn expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
-        use self::ExpansionState::*;
-        match tok {
-            Const(DoubleSlash) => expand!(self, DA, Const(Slash)),
-            Const(CurrentNode) => expand!(self, NA, Axis(SelfAxis)),
-            Const(ParentNode) => expand!(self, NA, Axis(Parent)),
-            Const(AtSign) => Axis(Attribute),
-            other => other,
+macro_rules! transition {
+    ($self: expr, $s: expr, $r: expr) => {
+        { $self.state = $s; Some(Ok($r))
         }
     }
 }
@@ -85,18 +66,56 @@ where
 }
 
 //============================================================================//
+// Deabbriviator, Internal FSM:
+//============================================================================//
+
+/// Tracks the state when deabbreviating.
+#[derive(Clone, Copy)]
+enum ExpansionState {
+    // Finite State Machine(s):
+    /// Transitions: DA => DB => DC => NE
+    DA,
+    DB,
+    DC,
+    /// Transitions: NA => NE
+    NA,
+    /// Not expanding
+    NE,
+}
+
+macro_rules! expand {
+    ($self: expr, $next: expr, $yield: expr) => {
+        { $self.state = $next; $yield }
+    }
+}
+
+impl<I> LexerDeabbreviator<I> {
+    fn expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
+        use self::ExpansionState::*;
+        match tok {
+            Const(DoubleSlash) => expand!(self, DA, Const(Slash)),
+            Const(CurrentNode) => expand!(self, NA, Axis(SelfAxis)),
+            Const(ParentNode) => expand!(self, NA, Axis(Parent)),
+            Const(AtSign) => Axis(Attribute),
+            other => other,
+        }
+    }
+}
+
+//============================================================================//
 // Tests:
 //============================================================================//
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lexer::Error;
 
     // helpers & macros:
 
     fn all_tokens(i: Vec<LexerResult>) -> Vec<Token<&str>> {
         LexerDeabbreviator::new(i.into_iter())
-            .collect::<Result<Vec<_>, LexerError>>()
+            .collect::<Result<Vec<_>, Error>>()
             .unwrap()
     }
 

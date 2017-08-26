@@ -12,11 +12,12 @@ use super::tokens::*;
 use super::tokens::CToken::*;
 use super::tokens::AxisName::*;
 use super::tokens::NodeType::*;
-//use super::tokens::NameTest::*;
 use super::tokens::Token::*;
 
+use self::Error::*;
+
 //============================================================================//
-// Errors
+// Public API, Lexer errors:
 //============================================================================//
 
 quick_error! {
@@ -68,25 +69,69 @@ quick_error! {
     }
 }
 
-use self::Error::*;
-
 //============================================================================//
-// Lexer type:
+// Public API, Lexer type:
 //============================================================================//
 
-// Various type aliases for brevity.
-type In<'a> = &'a str;
-type Tok<'a> = Token<In<'a>>;
-type OIn<'a> = Option<In<'a>>;
-type OTok<'a> = Option<Tok<'a>>;
+/// A [`Token`], with `&'a str` as the backing type for strings.
+///
+/// [`Token`]: struct.Token.html
+pub type StrToken<'a> = Token<In<'a>>;
 
 /// The result of running the lexer on some input.
-pub type LexerResult<'a> = Result<Tok<'a>, Error>;
+pub type LexerResult<'a> = Result<StrToken<'a>, Error>;
 
+/// The lexer of xpath expressions.
 pub struct Lexer<'a> {
     remains: In<'a>,
     prefer_op_names: bool,
 }
+
+//============================================================================//
+// Public API, Lexer implementation:
+//============================================================================//
+
+impl<'a> Lexer<'a> {
+    /// Constructs a new lexer for the given input string slice.
+    pub fn new(src: In) -> Lexer {
+        Lexer {
+            remains: src,
+            prefer_op_names: false,
+        }
+    }
+
+    /// Yields true if nothing remains to be lexed.
+    pub fn is_finished(&self) -> bool {
+        self.remains.is_empty()
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = LexerResult<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_finished() {
+            None
+        } else {
+            Some(self.next_token())
+        }
+    }
+}
+
+//============================================================================//
+// Internally used types:
+//============================================================================//
+
+// Various type aliases for brevity.
+
+/// Input type for all lexing.
+type In<'a> = &'a str;
+
+/// Option variant of input type.
+type OIn<'a> = Option<In<'a>>;
+
+/// Optional Token for &str.
+type OTok<'a> = Option<StrToken<'a>>;
 
 //============================================================================//
 // Lexing macros:
@@ -130,7 +175,7 @@ macro_rules! lexer {
         lexer!($name, lerr!($err, $($args)*));
     );
     ($name:ident, $($args:tt)*) => (
-        named!($name<In, Tok, Error>, $($args)*);
+        named!($name<In, StrToken, Error>, $($args)*);
     );
 }
 
@@ -373,7 +418,10 @@ par!(
 lexer!(
     lex_name_test,
     ExpectedNameTest,
-    map!(pair!(prefix, local_part), |(ns, lp)| NTest(NameTest(ns, lp)))
+    map!(
+        pair!(prefix, local_part),
+        |(ns, lp)| NTest(NameTest(ns, lp))
+    )
 );
 
 //============================================================================//
@@ -415,7 +463,7 @@ lexer!(lex_varref, map!(
 named!(whitespace<In, In, Error>, eat_separator!(" \t\r\n"));
 
 /// Lexes a single token given input and whether to prefer operator names or not.
-fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, Error> {
+fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, StrToken, Error> {
     #![allow(unused_variables)]
     #![allow(unknown_lints)]
     #![allow(cyclomatic_complexity)]
@@ -437,19 +485,6 @@ fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, Tok, Error> {
 }
 
 impl<'a> Lexer<'a> {
-    /// Constructs a new lexer for the given input string slice.
-    pub fn new(src: In) -> Lexer {
-        Lexer {
-            remains: src,
-            prefer_op_names: false,
-        }
-    }
-
-    /// Yields true if nothing remains to be lexed.
-    pub fn is_finished(&self) -> bool {
-        self.remains.is_empty()
-    }
-
     /// Produces the next available lexeme / token, if any,
     /// and advances the remaining input.
     fn next_token(&mut self) -> LexerResult<'a> {
@@ -467,18 +502,6 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = LexerResult<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.is_finished() {
-            None
-        } else {
-            Some(self.next_token())
-        }
-    }
-}
-
 //============================================================================//
 // Tests:
 //============================================================================//
@@ -486,10 +509,11 @@ impl<'a> Iterator for Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::Error;
 
     // helpers & macros:
 
-    type VTok<'a> = Vec<Tok<'a>>;
+    type VTok<'a> = Vec<StrToken<'a>>;
 
     use std::fmt::Debug;
     fn no_complete<T: Debug>(x: T) -> ! {
@@ -518,16 +542,16 @@ mod tests {
         };
     }
 
-    fn lpar() -> Tok<'static> {
+    fn lpar() -> StrToken<'static> {
         Const(LeftParen)
     }
 
-    fn rpar() -> Tok<'static> {
+    fn rpar() -> StrToken<'static> {
         Const(RightParen)
     }
 
     /// Fuses together a token and subsequent vector of tokens into a vector.
-    fn pars<'a>(first: Tok<'a>, args: VTok<'a>) -> VTok<'a> {
+    fn pars<'a>(first: StrToken<'a>, args: VTok<'a>) -> VTok<'a> {
         let mut cont = vec![first, lpar()];
         cont.extend(args);
         cont.push(rpar());
@@ -535,23 +559,23 @@ mod tests {
     }
 
     /// Creates a NameTest token out of the namespace/prefix and local part.
-    fn ntest<'a>(ns: OIn<'a>, lp: OIn<'a>) -> Tok<'a> {
+    fn ntest<'a>(ns: OIn<'a>, lp: OIn<'a>) -> StrToken<'a> {
         NTest(NameTest(ns, lp))
     }
 
-    fn lp(lp: In) -> Tok {
+    fn lp(lp: In) -> StrToken {
         ntest(None, Some(lp))
     }
 
-    fn q_lp<'a>(ns: In<'a>, lp: In<'a>) -> Tok<'a> {
+    fn q_lp<'a>(ns: In<'a>, lp: In<'a>) -> StrToken<'a> {
         ntest(Some(ns), Some(lp))
     }
 
-    fn wc<'a>() -> Tok<'a> {
+    fn wc<'a>() -> StrToken<'a> {
         ntest(None, None)
     }
 
-    fn q_wc<'a>(ns: In<'a>) -> Tok<'a> {
+    fn q_wc<'a>(ns: In<'a>) -> StrToken<'a> {
         ntest(Some(ns), None)
     }
 
