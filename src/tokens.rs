@@ -107,6 +107,18 @@ pub enum Token<S: AsRef<str>> {
 // Implementations
 //============================================================================//
 
+impl<S: AsRef<str>> From<S> for NameTest<S> {
+    fn from(local_part: S) -> Self {
+        NameTest(None, Some(local_part))
+    }
+}
+
+impl<S: AsRef<str>> From<S> for QName<S> {
+    fn from(local_part: S) -> Self {
+        QName(None, local_part)
+    }
+}
+
 impl<S: AsRef<str>> Token<S> {
     /// Yields true if token precedes a node test.
     pub fn precedes_node_test(&self) -> bool {
@@ -152,17 +164,6 @@ impl<S: AsRef<str>> Token<S> {
     }
 }
 
-impl<S: AsRef<str>> From<S> for QName<S> {
-    fn from(local_part: S) -> Self {
-        QName(None, local_part)
-    }
-}
-
-impl<S: AsRef<str>> From<S> for NameTest<S> {
-    fn from(local_part: S) -> Self {
-        NameTest(None, Some(local_part))
-    }
-}
 
 //============================================================================//
 // Functor API
