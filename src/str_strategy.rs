@@ -1,8 +1,12 @@
-//! Provides a [generic way] of reasoning about strategies for injection of the
-//! contents of things that [can be represented] as a [string slice] in a
-//! specific way. The strategies are:
+//! Provides a specific way to inject [string slice]s into other forms which
+//! are [representable] as a [string slice]s. This provides opportunities for
+//! caching, etc., when [interior mutability] is used.
 //!
-//! + cache it in a set, [`HashSetStrategy`]
+//! The strategies are:
+//!
+//! + cache it in a hash set, and yield `Rc<str>`, [`RcStrategy`]
+//! + cache it in a hash set, and yield [`HoldingRef`], [`HoldingRefStrategy`]
+//! + cache it in a hash set, but shareable across threads, [`ArcStrategy`]
 //! + box it in the heap, [`BoxStrategy`]
 //! + box it in the heap as a String, [`StringStrategy`]
 //! + just return the slice, [`RefStrategy`]
@@ -10,56 +14,197 @@
 //! [generic way]: trait.StrStrategy.html
 //! [can be represented]: https://doc.rust-lang.org/std/convert/trait.AsRef.html
 //! [string slice]: https://doc.rust-lang.org/std/primitive.str.html
-//! [`HashSetStrategy`]: struct.HashSetStrategy.html
+//! [`HoldingRef`]: struct.HoldingRef.html
+//! [`HoldingRefStrategy`]: struct.HoldingRefStrategy.html
+//! [`ArcStrategy`]: struct.ArcStrategy.html
+//! [`RcStrategy`]: struct.RcStrategy.html
 //! [`BoxStrategy`]: struct.BoxStrategy.html`
 //! [`StringStrategy`]: struct.StringStrategy.html
 //! [`RefStrategy`]: struct.RefStrategy.html
 
-use std::marker::PhantomData;
-use std::fmt;
 use std::collections::HashSet;
 use std::cell::UnsafeCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::hash::Hash;
+use std::ops::Deref;
 
-type BS = Box<str>;
-
-/// Takes something representable as a string slice and creates an owned
-/// `Box<str>` out of it.
-fn bs_new<S: AsRef<str>>(s: S) -> BS {
-    s.as_ref().to_owned().into_boxed_str()
-}
+use unreachable::UncheckedOptionExt;
 
 //============================================================================//
 // StrStrategy (trait)
 //============================================================================//
 
-/// Provides a specific way to inject things [representable] as a [string slice]
-/// as another form [representable] as a [string slice]. This provides
-/// opportunities for caching, etc., when [interior mutability] is used.
+/// Provides a specific way to inject [string slice]s into other forms which
+/// are [representable] as a [string slice]s. This provides opportunities for
+/// caching, etc., when [interior mutability] is used.
 ///
 /// [representable]: https://doc.rust-lang.org/std/convert/trait.AsRef.html
 /// [string slice]: https://doc.rust-lang.org/std/primitive.str.html
 /// [interior mutability]: https://doc.rust-lang.org/std/cell
 pub trait StrStrategy<'a> {
-    /// The type of inputs, representable as a string slice,
-    /// that the strategy accepts.
-    type Input: AsRef<str>;
-
     /// The type of outputs, representable as a string slice,
     /// that the strategy yields when used.
     type Output: AsRef<str>;
 
-    /// Injects the contents from an input of type [`Input`] to one of
+    /// Injects the contents from string slices to one of
     /// type [`Output`], with potential side effects.
     ///
     /// Subsequent applications should not panic.
     ///
-    /// [`Input`]: trait.StrStrategy.html#associatedtype.Input
     /// [`Output`]: trait.StrStrategy.html#associatedtype.Output
-    fn inject_str(&'a self, input: Self::Input) -> Self::Output;
+    fn inject_str(&self, input: &'a str) -> Self::Output;
+}
+
+/// [`StrStrategy`] which also cache:s injected strings.
+/// These are based on [`HashSet`]s and provide an immutable view into the set.
+///
+/// [`StrStrategy`]: trait.StrStrategy.html
+/// [`HashSet`]: https://doc.rust-lang.org/std/collections/struct.HashSet.html
+pub trait CachingStrStrategy<'a, Store>
+where
+    Self: StrStrategy<'a>,
+    Store: Eq + Hash,
+{
+    /// Provides an immutable view of the backing `HashSet` storage.
+    fn store<'store>(&'store self) -> &'store HashSet<Store>;
+}
+
+macro_rules! caching_strategy {
+    ($recv: ty, $store: ty) => {
+        impl $recv {
+            unsafe fn store_mut(&self) -> &mut HashSet<$store> {
+                self.0.get().as_mut().unchecked_unwrap()
+            }
+        }
+
+        impl <'a> CachingStrStrategy<'a, $store> for $recv {
+            fn store<'store>(&'store self) -> &'store HashSet<$store> {
+                unsafe { self.0.get().as_ref().unchecked_unwrap() }
+            }
+        }
+    };
+}
+
+macro_rules! cs_get_or_insert {
+    ($self: ident, $input: ident) => {{
+        let si = unsafe { $self.store_mut() };
+
+        // TODO: Replace with entry API if and when HashSet:s get them.
+        if !si.contains($input) {
+            si.insert($input.into());
+        }
+
+        let out = si.get($input);
+
+        unsafe { out.unchecked_unwrap() }
+    }};
 }
 
 //============================================================================//
-// HashSetStrategy
+// HoldingRefStrategy
+//============================================================================//
+
+/// Synonym for storage of `HoldingRefStrategy`.
+type HRSInside = Rc<UnsafeCell<HashSet<Box<str>>>>;
+
+/// A caching [`StrStrategy`] using the heap.
+/// Identical strings are only allocated once.
+/// Compared to [`RcStrategy`], this version uses more stack space but less
+/// heap space.
+///
+/// The strategy is internally backed by a [`HashSet`]
+/// which is never removed from.
+///
+/// [`RcStrategy`]: struct.RcStrategy.html
+/// [`StrStrategy`]: trait.StrStrategy.html
+/// [`HashSet`]: https://doc.rust-lang.org/std/collections/struct.HashSet.html
+#[derive(Debug, Default)]
+pub struct HoldingRefStrategy(HRSInside);
+
+impl<'a> StrStrategy<'a> for HoldingRefStrategy {
+    type Output = HoldingRef;
+
+    /// Allocates the given input in the cache and yields a HoldingRef to it.
+    fn inject_str(&self, input: &'a str) -> Self::Output {
+        /*
+         * This is safe because nothing is ever removed from the HashSet,
+         * and when it grows (length == capacity), Box<str> may be moved,
+         * but the heap allocated contents are never deallocated,
+         * thus the HoldingRef returned always points to a valid memory location.
+         * Therefore, this will never cause memory unsafety.
+         *
+         * In addition, UnsafeCell causes HashSetStrategy to be !Sync, which
+         * makes unsynchronized mutation impossible. Were this not the case,
+         * a data race could occur when reallocation of the HashSet occurs.
+         */
+        let out = cs_get_or_insert!(self, input);
+        HoldingRef {
+            parent: self.0.clone(),
+            item: out.as_ref(),
+        }
+    }
+}
+
+caching_strategy!(HoldingRefStrategy, Box<str>);
+
+/// A reference into boxed string slice stored inside a [`HoldingRefStrategy`].
+///
+/// [`HoldingRef`]: struct.HoldingRefStrategy.html
+pub struct HoldingRef {
+    parent: HRSInside,
+    item: *const str,
+}
+
+impl AsRef<str> for HoldingRef {
+    fn as_ref(&self) -> &str {
+        unsafe { &*self.item }
+    }
+}
+
+impl Deref for HoldingRef {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.item }
+    }
+}
+
+//============================================================================//
+// ArcStrategy
+//============================================================================//
+
+/// A caching [`StrStrategy`] using the heap.
+/// Identical strings are only allocated once.
+/// Unlike [`RcStrategy`], the strategy allocates into [`Arc`]s.
+///
+/// The strategy is internally backed by a [`HashSet`]
+/// which is never removed from.
+///
+/// [`StrStrategy`]: trait.StrStrategy.html
+/// [`RcStrategy`]: struct.RcStrategy.html
+/// [`HashSet`]: https://doc.rust-lang.org/std/collections/struct.HashSet.html
+/// [`Arc`]: https://doc.rust-lang.org/std/sync/struct.Arc.html
+#[derive(Debug, Default)]
+pub struct ArcStrategy(UnsafeCell<HashSet<Arc<str>>>);
+
+impl<'a> StrStrategy<'a> for ArcStrategy {
+    type Output = Arc<str>;
+
+    /// Allocates the given input in the cache and yields a cloned Arc<str>.
+    fn inject_str(&self, input: &'a str) -> Self::Output {
+        /*
+         * This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
+         * which makes unsynchronized mutation impossible.
+         */
+        cs_get_or_insert!(self, input).clone()
+    }
+}
+
+caching_strategy!(ArcStrategy, Arc<str>);
+
+//============================================================================//
+// RcStrategy
 //============================================================================//
 
 /// A caching [`StrStrategy`] using the heap.
@@ -70,78 +215,23 @@ pub trait StrStrategy<'a> {
 ///
 /// [`StrStrategy`]: trait.StrStrategy.html
 /// [`HashSet`]: https://doc.rust-lang.org/std/collections/struct.HashSet.html
-pub struct HashSetStrategy<I> {
-    store: UnsafeCell<HashSet<BS>>,
-    ph: PhantomData<I>,
-}
+#[derive(Debug, Default)]
+pub struct RcStrategy(UnsafeCell<HashSet<Rc<str>>>);
 
-impl<I: AsRef<str>> HashSetStrategy<I> {
-    #[allow(unknown_lints)]
-    #[allow(mut_from_ref)]
-    unsafe fn store_mut(&self) -> &mut HashSet<BS> {
-        self.store.get().as_mut().unwrap()
-    }
+impl<'a> StrStrategy<'a> for RcStrategy {
+    type Output = Rc<str>;
 
-    fn store(&self) -> &HashSet<BS> {
-        unsafe { self.store.get().as_ref().unwrap() }
-    }
-
-    /// The value of is_empty() on the owned hash set.
-    pub fn is_empty(&self) -> bool {
-        self.store().is_empty()
-    }
-
-    /// The value of len() of the owned hash set.
-    pub fn len(&self) -> usize {
-        self.store().len()
-    }
-
-    /// Has the given input been hashed already?
-    pub fn contains(&self, value: I) -> bool {
-        self.store().contains(value.as_ref())
-    }
-}
-
-impl<I> Default for HashSetStrategy<I> {
-    fn default() -> Self {
-        HashSetStrategy {
-            store: UnsafeCell::new(HashSet::new()),
-            ph: PhantomData,
-        }
-    }
-}
-
-impl<I: AsRef<str>> fmt::Debug for HashSetStrategy<I> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.store())
-    }
-}
-
-impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
-    type Input = I;
-    type Output = &'a str;
-
-    /// Allocates the given input in the cache and yields a reference to it.
-    fn inject_str(&'a self, input: Self::Input) -> Self::Output {
-        let i = input.as_ref();
-
+    /// Allocates the given input in the cache and yields a cloned Rc<str>.
+    fn inject_str(&self, input: &'a str) -> Self::Output {
         /*
-         * This is safe because nothing is ever removed from the HashSet,
-         * and when it grows (length == capacity), Box<str> may be moved,
-         * but the heap allocated contents are never deallocated,
-         * thus the &'a str returned always points to a valid memory location.
-         * Therefore, this will never cause memory unsafety.
+         * This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
+         * which makes unsynchronized mutation impossible.
          */
-        let si = unsafe { self.store_mut() };
-
-        // TODO: Replace with entry API if and when HashSet:s get them.
-        if !si.contains(i) {
-            si.insert(bs_new(i));
-        }
-
-        si.get(i).unwrap()
+         cs_get_or_insert!(self, input).clone()
     }
 }
+
+caching_strategy!(RcStrategy, Rc<str>);
 
 //============================================================================//
 // BoxStrategy
@@ -150,27 +240,15 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for HashSetStrategy<I> {
 /// A [`StrStrategy`] that simply allocates using the heap.
 ///
 /// [`StrStrategy`]: trait.StrStrategy.html
-pub struct BoxStrategy<I>(PhantomData<I>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+pub struct BoxStrategy;
 
-impl<I> Default for BoxStrategy<I> {
-    fn default() -> Self {
-        BoxStrategy(PhantomData)
-    }
-}
-
-impl<I> fmt::Debug for BoxStrategy<I> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BoxStrategy")
-    }
-}
-
-impl<'a, I: AsRef<str>> StrStrategy<'a> for BoxStrategy<I> {
+impl<'a> StrStrategy<'a> for BoxStrategy {
     type Output = Box<str>;
-    type Input = I;
 
     /// Allocates the input on the heap and just returns that box.
-    fn inject_str(&'a self, input: Self::Input) -> Self::Output {
-        bs_new(input)
+    fn inject_str(&self, input: &'a str) -> Self::Output {
+        input.into()
     }
 }
 
@@ -185,28 +263,16 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for BoxStrategy<I> {
 /// [`StrStrategy`]: trait.StrStrategy.html
 /// [`BoxStrategy`]: struct.BoxStrategy.html
 /// [`String`]: https://doc.rust-lang.org/nightly/collections/string/struct.String.html
-pub struct StringStrategy<I>(PhantomData<I>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+pub struct StringStrategy;
 
-impl<I> Default for StringStrategy<I> {
-    fn default() -> Self {
-        StringStrategy(PhantomData)
-    }
-}
-
-impl<I> fmt::Debug for StringStrategy<I> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StringStrategy")
-    }
-}
-
-impl<'a, I: AsRef<str>> StrStrategy<'a> for StringStrategy<I> {
+impl<'a> StrStrategy<'a> for StringStrategy {
     type Output = String;
-    type Input = I;
 
     /// Allocates the input on the heap as a [`String`] and just returns it.
     /// [`String`]: https://doc.rust-lang.org/nightly/collections/string/struct.String.html
-    fn inject_str(&'a self, input: Self::Input) -> Self::Output {
-        input.as_ref().to_owned()
+    fn inject_str(&self, input: &'a str) -> Self::Output {
+        input.into()
     }
 }
 
@@ -220,27 +286,15 @@ impl<'a, I: AsRef<str>> StrStrategy<'a> for StringStrategy<I> {
 /// The strategy must live as long as the most long lived input does.
 ///
 /// [`StrStrategy`]: trait.StrStrategy.html
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
 pub struct RefStrategy;
-
-impl Default for RefStrategy {
-    fn default() -> Self {
-        RefStrategy
-    }
-}
-
-impl fmt::Debug for RefStrategy {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "RefStrategy")
-    }
-}
 
 impl<'a> StrStrategy<'a> for RefStrategy {
     type Output = &'a str;
-    type Input = &'a str;
 
     /// Returns the given input back.
-    fn inject_str(&'a self, input: Self::Input) -> Self::Output {
-        input.as_ref()
+    fn inject_str(&self, input: &'a str) -> Self::Output {
+        input
     }
 }
 
@@ -249,27 +303,93 @@ impl<'a> StrStrategy<'a> for RefStrategy {
 //============================================================================//
 
 #[test]
-fn str_strategy_hashset() {
-    let ss = (HashSetStrategy::default(), 0);
+fn str_strategy_holdingref() {
     let (i1, i2, i3) = {
+        let ss = (HoldingRefStrategy::default(), 0);
         let s1 = "hello";
         let s2 = "world";
         let i1 = ss.0.inject_str(s1);
         // Force reallocation. We do this to ensure that addresses are stable.
         unsafe {
-            ss.0.store_mut().reserve(1);
+            ss.0.store_mut().reserve(10);
         }
         let i2 = ss.0.inject_str(s2);
         let i3 = ss.0.inject_str(s2);
+
+        assert!(ss.0.store().contains("hello"));
+        assert!(ss.0.store().contains("world"));
+        assert!(ss.0.store().len() == 2);
+
         (i1, i2, i3)
     };
-    assert_eq!("hello", i1);
-    assert_eq!("world", i2);
-    assert_eq!("world", i3);
+    assert_eq!("hello", i1.as_ref());
+    assert_eq!("world", i2.as_ref());
+    assert_eq!("world", i3.as_ref());
     assert_eq!(i2.as_ptr(), i3.as_ptr());
-    assert!(ss.0.contains("hello"));
-    assert!(ss.0.contains("world"));
-    assert!(ss.0.len() == 2);
+    /*
+    Won't compile since ArcStrategy is not Sync:
+    let ss1 = std::sync::Arc::new(ArcStrategy::default());
+    */
+}
+
+#[test]
+fn str_strategy_arc() {
+    let (i1, i2, i3) = {
+        let ss = (ArcStrategy::default(), 0);
+        let s1 = "hello";
+        let s2 = "world";
+        let i1 = ss.0.inject_str(s1);
+        // Force reallocation. We do this to ensure that addresses are stable.
+        unsafe {
+            ss.0.store_mut().reserve(10);
+        }
+        let i2 = ss.0.inject_str(s2);
+        let i3 = ss.0.inject_str(s2);
+
+        assert!(ss.0.store().contains("hello"));
+        assert!(ss.0.store().contains("world"));
+        assert!(ss.0.store().len() == 2);
+
+        (i1, i2, i3)
+    };
+    assert_eq!("hello", i1.as_ref());
+    assert_eq!("world", i2.as_ref());
+    assert_eq!("world", i3.as_ref());
+    assert_eq!(i2.as_ptr(), i3.as_ptr());
+    /*
+    Won't compile since ArcStrategy is not Sync:
+    let ss1 = std::sync::Arc::new(ArcStrategy::default());
+    */
+}
+
+#[test]
+fn str_strategy_rc() {
+    let (i1, i2, i3) = {
+        let ss = (RcStrategy::default(), 0);
+        let s1 = "hello";
+        let s2 = "world";
+        let i1 = ss.0.inject_str(s1);
+        // Force reallocation. We do this to ensure that addresses are stable.
+        unsafe {
+            ss.0.store_mut().reserve(10);
+        }
+        let i2 = ss.0.inject_str(s2);
+        let i3 = ss.0.inject_str(s2);
+
+        assert!(ss.0.store().contains("hello"));
+        assert!(ss.0.store().contains("world"));
+        assert!(ss.0.store().len() == 2);
+
+        (i1, i2, i3)
+    };
+    assert_eq!("hello", i1.as_ref());
+    assert_eq!("world", i2.as_ref());
+    assert_eq!("world", i3.as_ref());
+    assert_eq!(i2.as_ptr(), i3.as_ptr());
+    /*
+    Won't compile since ArcStrategy is not Sync:
+    let ss1 = std::sync::Arc::new(RcStrategy::default());
+    */
 }
 
 #[test]
