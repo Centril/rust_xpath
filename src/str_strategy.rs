@@ -79,7 +79,7 @@ macro_rules! caching_strategy {
         }
 
         impl <'a> CachingStrStrategy<'a, $store> for $recv {
-            fn store<'store>(&'store self) -> &'store HashSet<$store> {
+            fn store(&self) -> &HashSet<$store> {
                 unsafe { self.0.get().as_ref().unchecked_unwrap() }
             }
         }

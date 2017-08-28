@@ -1,10 +1,9 @@
 #![allow(dead_code)]
-//#![allow(unused_imports)]
-
-#![feature(inclusive_range_syntax)]
+#![allow(unused_imports)]
+#![allow(unused_macros)]
+#![allow(unknown_lints)]
 #![feature(test)]
 #![feature(plugin)]
-
 #![plugin(phf_macros)]
 extern crate phf;
 
@@ -16,11 +15,17 @@ extern crate quick_error;
 
 extern crate test;
 
-mod tokens;
+extern crate unreachable;
 
-mod lexer;
-mod lexer_deabbr;
+pub mod tokens;
+
+pub mod lexer;
+pub mod lexer_deabbr;
 
 pub mod str_strategy;
 
-mod expr;
+pub mod expr;
+
+pub mod parser;
+
+mod util;

@@ -69,6 +69,9 @@ quick_error! {
     }
 }
 
+/// The result of running the lexer on some input.
+pub type LexerResult<'a> = Result<StrToken<'a>, Error>;
+
 //============================================================================//
 // Public API, Lexer type:
 //============================================================================//
@@ -76,10 +79,7 @@ quick_error! {
 /// A [`Token`], with `&'a str` as the backing type for strings.
 ///
 /// [`Token`]: struct.Token.html
-pub type StrToken<'a> = Token<In<'a>>;
-
-/// The result of running the lexer on some input.
-pub type LexerResult<'a> = Result<StrToken<'a>, Error>;
+pub(crate) type StrToken<'a> = Token<In<'a>>;
 
 /// The lexer of xpath expressions.
 pub struct Lexer<'a> {
