@@ -15,3 +15,8 @@ phf         = "0.7.21"
 phf_macros  = "0.7.21"
 quick-error = "1.2.0"
 unreachable = "1.0.0"
+itertools   = "0.6.2"
+
+[dev-dependencies]
+quickcheck        = "0.4"
+quickcheck_macros = "0.4"

@@ -3,7 +3,10 @@
 //============================================================================//
 
 use unreachable::unreachable;
+use itertools;
+use itertools::Itertools;
 
+use std::mem;
 use std::iter::Peekable;
 
 use super::expr;
@@ -12,10 +15,8 @@ use super::tokens;
 use super::tokens::*;
 use super::tokens::CToken::*;
 use super::lexer::{self, LexerResult, StrToken};
-use super::util::to_boxed_str;
 
 use self::Error::*;
-
 
 //============================================================================//
 // Errors:
@@ -60,8 +61,8 @@ quick_error! {
     }
 }
 
-impl<'a> From<StrToken<'a>> for Error {
-    fn from(t: StrToken<'a>) -> Self {
+impl<'str> From<StrToken<'str>> for Error {
+    fn from(t: StrToken<'str>) -> Self {
         t.boxed_str().into()
     }
 }
@@ -84,27 +85,42 @@ pub trait XPathParser<'input> {
 //============================================================================//
 
 /// An `XPath` expression parser.
-struct Parser<'sm, SM: SubMaker<'sm> + 'sm>(SM, PhantomData<&'sm SM>);
-
-impl<'sm, SM> Parser<'sm, SM>
+///
+/// This is a bit backwards... Expr should specify its allocator instead.
+/// But since ATCs are not yet implemented, it is not possible.
+/// This will be changed in a future version.
+struct Parser<'alloc, A>
 where
-    SM: SubMaker<'sm>
+    A: Allocator<'alloc> + 'alloc
+{
+    allocator: A,
+    dummy: PhantomData<&'alloc A>
+}
+
+impl<'alloc, A> Parser<'alloc, A>
+where
+    A: Allocator<'alloc>
 {
     /// Constructs a new parser.
-    pub fn new(sm: SM) -> Self {
-        Parser(sm, PhantomData)
+    pub fn new(alloc: A) -> Self {
+        Parser {
+            allocator: alloc,
+            dummy: PhantomData
+        }
     }
 
-    pub fn into_submaker(self) -> SM {
-        self.0
+    /// Consumes the parser into the backing allocator.
+    pub fn into_allocator(self) -> A {
+        self.allocator
     }
 }
 
-impl<'input: 'sm, 'sm, SM> XPathParser<'input> for Parser<'sm, SM>
+impl<'input, 'alloc, A> XPathParser<'input> for Parser<'alloc, A>
 where
-    SM: SubMaker<'sm>
+    'input: 'alloc,
+    A: Allocator<'alloc>,
 {
-    type Expr = SM::Exp;
+    type Expr = A::Expr;
 
     fn parse(&self, input: &'input str) -> ParseResult<Self::Expr> {
         let tokens = Lexer::new(input);
@@ -113,17 +129,18 @@ where
     }
 }
 
-impl<'sm, SM> Parser<'sm, SM>
+impl<'alloc, A> Parser<'alloc, A>
 where
-    SM: SubMaker<'sm>
+    A: Allocator<'alloc>
 {
-    pub fn parse_iter<'a: 'sm, I>(&self, source: I) -> ParseResult<SM::Exp>
+    pub fn parse_iter<'input, I>(&self, source: I) -> ParseResult<A::Expr>
     where
-        I: Iterator<Item = LexerResult<'a>>,
+        'input: 'alloc,
+        I: Iterator<Item = LexerResult<'input>> + 'input,
     {
         let mut source = source.peekable();
 
-        let expr = parse_or_expression(&mut source, &self.0)?;
+        let expr = parse_or_expression(&mut source, &self.allocator)?;
 
         if source.has_more_tokens() {
             return Err(ExtraUnparsedTokens);
@@ -133,10 +150,11 @@ where
     }
 }
 
-pub fn parse<'a, I, SM>(source: I, sm: &SM) -> ParseResult<SM::Exp>
+/*
+pub fn parse<'a, I, SM>(source: I, sm: &SM) -> ParseResult<SM::Expr>
 where
-    I: Iterator<Item = LexerResult<'a>>,
-    SM: SubMaker<'a>
+    I: Iterator<Item = LexerResult<'a>> + 'a,
+    SM: Allocator<'a>
 {
         let mut source = source.peekable();
 
@@ -148,54 +166,85 @@ where
 
         expr.ok_or(EmptyXPath)
 }
+*/
 
+//============================================================================//
+// Parser API: Expression allocators
+//============================================================================//
 
-pub trait SubMaker<'a> {
-    type Exp: Expr;
+/// Provides allocation mechanisms for the Parser.
+/// The parser itself never directly allocates and insteads the allocator
+/// to perform any needed allocation.
+///
+/// Through this mechanism, a variety of methods can be used for allocation,
+/// including simply using `Box`, stack allocation, `typed_arena`.
+pub trait Allocator<'input> {
+    /// The type of expressions produced by this allocator.
+    type Expr: Expr;
 
-    fn new(&self, exp: Self::Exp) -> <Self::Exp as Expr>::ExprSub;
+    /// Allocates a single expression.
+    fn alloc(&self, exp: Self::Expr) -> <Self::Expr as Expr>::ExprSub;
 
-    fn new_exprs(&self, exp: Vec<Self::Exp>) -> <Self::Exp as Expr>::ExprList;
+    /// Allocates two expressions. Provided for optimization purposes.
+    fn alloc_bin(&self, l: Self::Expr, r: Self::Expr)
+        -> (<Self::Expr as Expr>::ExprSub, <Self::Expr as Expr>::ExprSub);
 
-    fn new_steps(&self, steps: Vec<<Self::Exp as Expr>::Steps>) -> <Self::Exp as Expr>::StepsList;
+    /// Allocates a lazy iterator of possible expressions,
+    /// in case any expression failed to parse and resulted in error,
+    /// any allocation will be free'd and the entire computation results
+    /// in an error.
+    fn alloc_list<I>(&self, iter: I)
+        -> ParseResult<<Self::Expr as Expr>::ExprList>
+    where
+        I: Iterator<Item = ParseResult<Self::Expr>>;
 
-    fn new_lit(&self, s: &'a str) -> <Self::Exp as Expr>::L;
+    /// Allocates a lazy iterator of possible steps,
+    /// in case any expression failed to parse and resulted in error,
+    /// any allocation will be free'd and the entire computation results
+    /// in an error.
+    fn alloc_steps<I>(&self, iter: I)
+        -> ParseResult<<Self::Expr as Expr>::StepsList>
+    where
+        I: Iterator<Item = ParseResult<<Self::Expr as Expr>::Steps>>;
 
-    fn new_prefix(&self, s: &'a str) -> <Self::Exp as Expr>::P;
+    /// Allocates a new string literal.
+    fn alloc_lit(&self, s: &'input str) -> <Self::Expr as Expr>::L;
 
-    fn new_local(&self, s: &'a str) -> <Self::Exp as Expr>::S;
+    /// Allocates a new prefix for a qname/node name.
+    fn alloc_prefix(&self, s: &'input str) -> <Self::Expr as Expr>::P;
+
+    /// Allocates a new local part for a qname/node name.
+    fn alloc_local(&self, s: &'input str) -> <Self::Expr as Expr>::S;
 }
-
-
 
 use super::str_strategy as ss;
 
 use std::marker::PhantomData;
 
-struct BoxSubMaker<
-    'a,
+struct BoxAllocator<
+    'input,
     P = ss::BoxStrategy,
     S = ss::BoxStrategy,
     L = ss::BoxStrategy>
 where
-    P: ss::StrStrategy<'a>,
-    S: ss::StrStrategy<'a>,
-    L: ss::StrStrategy<'a>,
+    P: ss::StrStrategy<'input>,
+    S: ss::StrStrategy<'input>,
+    L: ss::StrStrategy<'input>,
 {
     s_prefix: P,
     s_localp: S,
     s_literal: L,
-    ph: PhantomData<&'a ()>
+    ph: PhantomData<&'input ()>
 }
 
-impl<'a, P, S, L> Default for BoxSubMaker<'a, P, S, L>
+impl<'input, P, S, L> Default for BoxAllocator<'input, P, S, L>
 where
-    P: ss::StrStrategy<'a> + Default,
-    S: ss::StrStrategy<'a> + Default,
-    L: ss::StrStrategy<'a> + Default,
+    P: ss::StrStrategy<'input> + Default,
+    S: ss::StrStrategy<'input> + Default,
+    L: ss::StrStrategy<'input> + Default,
 {
     fn default() -> Self {
-        BoxSubMaker {
+        BoxAllocator {
             s_prefix: Default::default(),
             s_localp: Default::default(),
             s_literal: Default::default(),
@@ -204,55 +253,79 @@ where
     }
 }
 
-impl<'a, P, S, L> SubMaker<'a> for BoxSubMaker<'a, P, S, L>
+impl<'input, P, S, L> Allocator<'input> for BoxAllocator<'input, P, S, L>
 where
-    P: ss::StrStrategy<'a>,
-    S: ss::StrStrategy<'a>,
-    L: ss::StrStrategy<'a>,
+    P: ss::StrStrategy<'input>,
+    S: ss::StrStrategy<'input>,
+    L: ss::StrStrategy<'input>,
 {
-    type Exp = ExprB<P::Output, S::Output, L::Output>;
+    type Expr = ExprB<P::Output, S::Output, L::Output>;
 
-    fn new(&self, exp: Self::Exp) -> <Self::Exp as Expr>::ExprSub {
+    fn alloc(&self, exp: Self::Expr) -> <Self::Expr as Expr>::ExprSub {
         Box::new(exp)
     }
 
-    fn new_exprs(&self, exp: Vec<Self::Exp>) -> <Self::Exp as Expr>::ExprList {
-        exp.into_boxed_slice()
+    fn alloc_bin(&self, l: Self::Expr, r: Self::Expr) ->
+        (<Self::Expr as Expr>::ExprSub, <Self::Expr as Expr>::ExprSub) {
+        (self.alloc(l), self.alloc(r))
     }
 
-    fn new_steps(&self, steps: Vec<<Self::Exp as Expr>::Steps>) -> <Self::Exp as Expr>::StepsList {
-        steps.into_boxed_slice()
+    fn alloc_list<I>(&self, iter: I)
+        -> ParseResult<<Self::Expr as Expr>::ExprList>
+    where
+        I: Iterator<Item = ParseResult<Self::Expr>>
+    {
+        failible_iter_to_boxslice(iter)
     }
 
-    fn new_lit(&self, s: &'a str) -> <Self::Exp as Expr>::L {
+    fn alloc_steps<I>(&self, iter: I)
+        -> ParseResult<<Self::Expr as Expr>::StepsList>
+    where
+        I: Iterator<Item = ParseResult<<Self::Expr as Expr>::Steps>>
+    {
+        failible_iter_to_boxslice(iter)
+    }
+
+    fn alloc_lit(&self, s: &'input str) -> <Self::Expr as Expr>::L {
         self.s_literal.inject_str(s)
     }
 
-    fn new_prefix(&self, s: &'a str) -> <Self::Exp as Expr>::P {
+    fn alloc_prefix(&self, s: &'input str) -> <Self::Expr as Expr>::P {
         self.s_prefix.inject_str(s)
     }
 
-    fn new_local(&self, s: &'a str) -> <Self::Exp as Expr>::S {
+    fn alloc_local(&self, s: &'input str) -> <Self::Expr as Expr>::S {
         self.s_localp.inject_str(s)
     }
 }
 
-type BSM<'a> = BoxSubMaker<'a>;
+fn failible_iter_to_boxslice<T, E, I>(iter: I) -> Result<Box<[T]>, E>
+where
+    I: Iterator<Item = Result<T, E>>
+{
+    itertools::process_results(iter, move |iter| {
+        iter.collect_vec().into_boxed_slice()
+    })
+}
 
+type BSM<'input> = BoxAllocator<'input>;
 
 //============================================================================//
 // Internal: Types:
 //============================================================================//
 
-type TokenSource<'a, I> = &'a mut Peekable<I>;
+type TokenSource<'input, I> = &'input mut Peekable<I>;
 
 type PRO<E> = ParseResult<Option<E>>;
+type PRONT<P, S> = PRO<NodeTest<P, S>>;
 
-type BinaryExpressionBuilder<E: Expr> = fn(E::ExprSub, E::ExprSub) -> E;
+type BinaryExpressionBuilder<E, ES> = fn((ES, ES)) -> E;
+
+type Rule<I, A, Expr> = fn(TokenSource<I>, &A) -> PRO<Expr>;
 
 struct BinaryRule<E: Expr> {
     token: CToken,
-    builder: BinaryExpressionBuilder<E>,
+    builder: BinaryExpressionBuilder<E, E::ExprSub>,
 }
 
 //============================================================================//
@@ -261,10 +334,11 @@ struct BinaryRule<E: Expr> {
 
 macro_rules! new_bin_op {
     ($fn: ident, $op: expr) => {
-        fn $fn<E>(l: E::ExprSub, r: E::ExprSub) -> E
+        fn $fn<E>(operands: (E::ExprSub, E::ExprSub)) -> E
         where
             E: Expr
         {
+            let (l, r) = operands;
             E::new_bin($op, l, r)
         }
     }
@@ -284,21 +358,46 @@ new_bin_op!(new_mul, BinaryOp::Mul);
 new_bin_op!(new_div, BinaryOp::Div);
 new_bin_op!(new_rem, BinaryOp::Rem);
 new_bin_op!(new_union, BinaryOp::Union);
+new_bin_op!(new_filter, BinaryOp::Union);
+
+//============================================================================//
+// Internal: Conversions:
+//============================================================================//
+
+fn fix_qname<'alloc, A>(sm: &A, qn: &tokens::QName<&'alloc str>)
+    -> expr::QName<<A::Expr as Expr>::P, <A::Expr as Expr>::S>
+where
+    A: Allocator<'alloc>
+{
+    expr::QName(qn.prefix, qn.local)
+        .map(|s| sm.alloc_prefix(s), |s| sm.alloc_local(s))
+}
+
+fn fix_name_test<'alloc, A>(alloc: &A, nt: &tokens::NameTest<&'alloc str>)
+    -> expr::NameTest<<A::Expr as Expr>::P, <A::Expr as Expr>::S>
+where
+    A: Allocator<'alloc>
+{
+    expr::NameTest {
+        prefix: nt.prefix,
+        local: nt.local
+    }.map(|s| alloc.alloc_prefix(s), |s| alloc.alloc_local(s))
+}
 
 //============================================================================//
 // Internal: Parsing utilities:
 //============================================================================//
 
-trait XCompat<'a> {
+trait XCompat<'input> {
     fn has_more_tokens(&mut self) -> bool;
     fn next_token_is(&mut self, token: CToken) -> bool;
     fn consume(&mut self, token: CToken) -> ParseResult<()>;
     fn consume_if_eq(&mut self, token: CToken) -> bool;
 }
 
-impl<'a, I> XCompat<'a> for Peekable<I>
+impl<'input, I> XCompat<'input> for Peekable<I>
 where
-    I: Iterator<Item = LexerResult<'a>>,
+    I: Iterator<Item = LexerResult<'input>>,
 {
     fn has_more_tokens(&mut self) -> bool {
         self.peek().is_some()
@@ -334,25 +433,90 @@ where
 
 macro_rules! basic_parser {
     ($name: ident ($source: ident $(, $par: ident : $tpar: ty)*) -> $tret: ty { $($args:tt)* }) => {
-        fn $name<'a, I>($source: TokenSource<I> $(, $par : $tpar)*) -> $tret
-        where I: Iterator<Item = LexerResult<'a>>,
+        fn $name<'input, I>($source: TokenSource<I> $(, $par : $tpar)*) -> $tret
+        where
+            I: Iterator<Item = LexerResult<'input>> + 'input,
         {
             $($args)*
         }
     }
 }
 
-macro_rules! parser2 {
-    ($name: ident ($source: ident, $sm: ident $(, $par: ident : $tpar: ty)*) -> $tret: ty { $($args:tt)* }) => {
-        fn $name<'a: 'sm, 'sm, I, SM>($source: TokenSource<I>, $sm: &SM $(, $par : $tpar)*) -> $tret
+macro_rules! parser {
+    ($name: ident ($source: ident, $alloc: ident $(, $par: ident : $tpar: ty)*) -> $tret: ty { $($args:tt)* }) => {
+        fn $name<'input, 'alloc, I, A>($source: TokenSource<I>, $alloc: &A $(, $par : $tpar)*) -> $tret
         where
-            I: Iterator<Item = LexerResult<'a>>,
-            SM: SubMaker<'sm>,
+            'input: 'alloc,
+            I: Iterator<Item = LexerResult<'input>> + 'input,
+            A: Allocator<'alloc> + 'alloc,
         {
             $($args)*
         }
     }
 }
+
+macro_rules! expr_parser {
+    ($name: ident ($source: ident, $alloc: ident $(, $par: ident : $tpar: ty)*) { $($args:tt)* }) => {
+        fn $name<'input, 'alloc, I, A>($source: TokenSource<I>, $alloc: &A $(, $par : $tpar)*) -> PRO<A::Expr>
+        where
+            'input: 'alloc,
+            I: Iterator<Item = LexerResult<'input>> + 'input,
+            A: Allocator<'alloc> + 'alloc,
+        {
+            $($args)*
+        }
+    }
+}
+
+fn delim_par<'input, 'alloc, I, A, F, T>(i: TokenSource<I>, alloc: &A, interior: F)
+    -> ParseResult<T>
+where
+    'input: 'alloc,
+    I: Iterator<Item = LexerResult<'input>>,
+    A: Allocator<'alloc>,
+    F: FnOnce(TokenSource<I>, &A) -> ParseResult<T>,
+{
+    i.consume(LeftParen)?;
+    let ret = interior(i, alloc)?;
+    i.consume(RightParen)?;
+    Ok(ret)
+}
+
+expr_parser!(lassoc_parse(i, alloc,
+    child_parse: fn(TokenSource<I>, &A) -> PRO<A::Expr>,
+    rules: &[BinaryRule<A::Expr>]) {
+
+    let mut left = if let Some(x) = child_parse(i, alloc)? { x }
+                else { return Ok(None) };
+
+    #[cfg_attr(feature = "cargo-clippy", allow(never_loop))]
+    'outer: while i.has_more_tokens() {
+        for rule in rules {
+            if i.consume_if_eq(rule.token) {
+                let right = if let Some(x) = child_parse(i, alloc)? { x }
+                            else { return Err(RightHandSideExpressionMissing) };
+
+                left = (rule.builder)(alloc.alloc_bin(left, right));
+                continue 'outer;
+            }
+        }
+
+        break 'outer;
+    }
+
+    Ok(Some(left))
+});
+
+expr_parser!(first_matching_rule(i, alloc, rules: &[Rule<I, A, A::Expr>]) {
+    for sub in rules.iter() {
+        let expr = (*sub)(i, alloc)?;
+        if expr.is_some() {
+            return Ok(expr);
+        }
+    }
+
+    Ok(None)
+});
 
 basic_parser!(consume_slash(i) -> bool {
     i.consume_if_eq(Slash)
@@ -367,10 +531,40 @@ macro_rules! consume_match(
     );
 );
 
-fn brule<E: Expr>(ct: CToken, b: BinaryExpressionBuilder<E>) -> BinaryRule<E> {
+fn brule<E: Expr>(ct: CToken, b: BinaryExpressionBuilder<E, E::ExprSub>)
+    -> BinaryRule<E>
+{
     BinaryRule {
         token: ct,
         builder: b,
+    }
+}
+
+fn failible_map<F, T, U, E>(opt: Option<T>, cont: F) -> Result<Option<U>, E>
+where
+    F: FnOnce(T) -> Result<Option<U>, E>
+{
+    opt.map_or_else(|| Ok(None), cont)
+}
+
+fn apply_or_none<F, U, E>(cond: bool, cont: F) -> Result<Option<U>, E>
+where
+    F: FnOnce() -> Result<Option<U>, E>
+{
+    if cond { cont() } else { Ok(None) }    
+}
+
+fn invert_opt_res<T, E, F>(
+    ro: Result<Option<T>, E>,
+    fail: F)
+    -> Option<Result<T, E>>
+where
+    F: FnOnce() -> Option<Result<T, E>>
+{
+    match ro {
+        Ok(Some(x)) => Some(Ok(x)),
+        Ok(None) => fail(),
+        Err(e) => Some(Err(e)),
     }
 }
 
@@ -378,97 +572,27 @@ fn brule<E: Expr>(ct: CToken, b: BinaryExpressionBuilder<E>) -> BinaryRule<E> {
 // Internal: Parsers:
 //============================================================================//
 
-
-fn fix_qname<'sm, SM>(sm: &SM, qn: &tokens::QName<&'sm str>) -> expr::QName<<SM::Exp as Expr>::P, <SM::Exp as Expr>::S>
-where
-    SM: SubMaker<'sm>
-{
-    expr::QName(qn.0, qn.1).map(|s| sm.new_prefix(s), |s| sm.new_local(s))
-}
-
-fn fix_name_test<'sm, SM>(sm: &SM, nt: &tokens::NameTest<&'sm str>) -> expr::NameTest<<SM::Exp as Expr>::P, <SM::Exp as Expr>::S>
-where
-    SM: SubMaker<'sm>
-{
-    expr::NameTest {
-        prefix: nt.0,
-        local: nt.1
-    }.map(|s| sm.new_prefix(s), |s| sm.new_local(s))
-}
-
-fn delim_par<'a: 'sm, 'sm, I, SM, F, T>(i: TokenSource<I>, sm: &SM, interior: F) -> ParseResult<T>
-where
-    I: Iterator<Item = LexerResult<'a>>,
-    SM: SubMaker<'sm>,
-    F: FnOnce(TokenSource<I>, &SM) -> ParseResult<T>,
-{
-    i.consume(LeftParen)?;
-    let ret = interior(i, sm)?;
-    i.consume(RightParen)?;
-    Ok(ret)
-}
-
-parser2!(lassoc_parse(i, sm,
-    child_parse: fn(TokenSource<I>, &SM) -> PRO<SM::Exp>,
-    rules: &[BinaryRule<SM::Exp>]) -> PRO<SM::Exp> {
-    let mut left = if let Some(x) = child_parse(i, sm)? { x }
-                else { return Ok(None) };
-
-    #[allow(never_loop)]
-    'outer: while i.has_more_tokens() {
-        for rule in rules {
-            if i.consume_if_eq(rule.token) {
-                let right = if let Some(x) = child_parse(i, sm)? { x }
-                            else { return Err(RightHandSideExpressionMissing) };
-
-
-                let ll = sm.new(left);
-                let rr = sm.new(right);
-
-                left = (rule.builder)(ll, rr);
-                continue 'outer;
-            }
-        }
-
-        break 'outer;
-    }
-
-    Ok(Some(left))
+expr_parser!(parse_expression(i, alloc) {
+    parse_or_expression(i, alloc)
 });
 
-parser2!(first_matching_rule(i, sm,
-    rules: &[fn(TokenSource<I>, &SM) -> PRO<SM::Exp>]) -> PRO<SM::Exp> {
-    for sub in rules.iter() {
-        let expr = (*sub)(i, sm)?;
-        if expr.is_some() {
-            return Ok(expr);
-        }
-    }
-
-    Ok(None)
+expr_parser!(parse_or_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_and_expression, &[brule(Or, new_or)])
 });
 
-parser2!(parse_expression(i, sm) -> PRO<SM::Exp> {
-    parse_or_expression(i, sm)
+expr_parser!(parse_and_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_equality_expression, &[brule(And, new_and)])
 });
 
-parser2!(parse_or_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_and_expression, &[brule(Or, new_or)])
-});
-
-parser2!(parse_and_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_equality_expression, &[brule(And, new_and)])
-});
-
-parser2!(parse_equality_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_relational_expression, &[
+expr_parser!(parse_equality_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_relational_expression, &[
         brule(Equal, new_eq),
         brule(NotEqual, new_neq),
     ])
 });
 
-parser2!(parse_relational_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_additive_expression, &[
+expr_parser!(parse_relational_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_additive_expression, &[
         brule(LessThan, new_lt),
         brule(LessThanOrEqual, new_le),
         brule(GreaterThan, new_gt),
@@ -476,48 +600,47 @@ parser2!(parse_relational_expression(i, sm) -> PRO<SM::Exp> {
     ])
 });
 
-parser2!(parse_additive_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_multiplicative_expression, &[
+expr_parser!(parse_additive_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_multiplicative_expression, &[
         brule(PlusSign, new_add),
         brule(MinusSign, new_sub),
     ])
 });
 
-parser2!(parse_multiplicative_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_unary_expression, &[
+expr_parser!(parse_multiplicative_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_unary_expression, &[
         brule(Multiply, new_mul),
         brule(Divide, new_div),
         brule(Remainder, new_rem),
     ])
 });
 
-parser2!(parse_unary_expression(i, sm) -> PRO<SM::Exp> {
-    let expr = parse_union_expression(i, sm)?;
+expr_parser!(parse_unary_expression(i, alloc) {
+    let expr = parse_union_expression(i, alloc)?;
     if expr.is_some() {
         return Ok(expr);
     }
 
-    i.consume_if_eq(MinusSign).failible_map(|_|
-        parse_unary_expression(i, sm)?.map_or_else(
+    apply_or_none(i.consume_if_eq(MinusSign), ||
+        parse_unary_expression(i, alloc)?.map_or_else(
             || Err(RightHandSideExpressionMissing),
-            |e| Ok(Some(SM::Exp::new_neg(sm.new(e)))),
-        )
-    )
+            |e| Ok(Some(A::Expr::new_neg(alloc.alloc(e)))),
+        ))
 });
 
-parser2!(parse_union_expression(i, sm) -> PRO<SM::Exp> {
-    lassoc_parse(i, sm, parse_path_expression, &[brule(Pipe, new_union)])
+expr_parser!(parse_union_expression(i, alloc) {
+    lassoc_parse(i, alloc, parse_path_expression, &[brule(Pipe, new_union)])
 });
 
-parser2!(parse_path_expression(i, sm) -> PRO<SM::Exp> {
-    let expr = parse_location_path(i, sm)?;
+expr_parser!(parse_path_expression(i, alloc) {
+    let expr = parse_location_path(i, alloc)?;
     if expr.is_some() {
         return Ok(expr);
     } // TODO: investigate if this is a pattern
 
-    parse_filter_expression(i, sm)?.failible_map(|expr| {
+    failible_map(parse_filter_expression(i, alloc)?, |expr| {
         if consume_slash(i) {
-            parse_relative_location_path_raw(i, sm, expr)?
+            parse_relative_location_path_raw(i, alloc, expr)?
                 .map_or_else(|| Err(TrailingSlash), |e| Ok(Some(e)))
         } else {
             Ok(Some(expr))
@@ -525,76 +648,118 @@ parser2!(parse_path_expression(i, sm) -> PRO<SM::Exp> {
     })
 });
 
-parser2!(parse_filter_expression(i, sm) -> PRO<SM::Exp> {
-    parse_primary_expression(i, sm)?.failible_map(|expr| {
-        Ok(Some(parse_predicates(i, sm)?.into_iter().fold(
-            expr,
-            |expr, pred| SM::Exp::new_filter(sm.new(expr), sm.new(pred)),
-        )))
+expr_parser!(parse_filter_expression(i, alloc) {
+    failible_map(parse_primary_expression(i, alloc)?, |expr| {
+        itertools::process_results(Predicates::new(i, alloc), move |iter|
+            iter.fold(expr, |expr, pred|
+                new_filter(alloc.alloc_bin(expr, pred)))
+        ).map(Some)
     })
 });
 
-parser2!(parse_location_path(i, sm) -> PRO<SM::Exp> {
-    first_matching_rule(i, sm, &[
+expr_parser!(parse_location_path(i, alloc) {
+    first_matching_rule(i, alloc, &[
         parse_relative_location_path,
         parse_absolute_location_path,
     ])
 });
 
-parser2!(parse_absolute_location_path(i, sm) -> PRO<SM::Exp> {
-    consume_slash(i).failible_map(|_|
-        parse_relative_location_path_raw(i, sm, SM::Exp::new_root_node())
-            .map(|path| path.or_else(|| Some(SM::Exp::new_root_node()))))
+expr_parser!(parse_absolute_location_path(i, alloc) {
+    apply_or_none(consume_slash(i), ||
+        parse_relative_location_path_raw(i, alloc, A::Expr::new_root_node())
+            .map(|path| path.or_else(|| Some(A::Expr::new_root_node()))))
 });
 
-parser2!(parse_relative_location_path(i, sm) -> PRO<SM::Exp> {
-    parse_relative_location_path_raw(i, sm, SM::Exp::new_context_node())
+expr_parser!(parse_relative_location_path(i, alloc) {
+    parse_relative_location_path_raw(i, alloc, A::Expr::new_context_node())
 });
 
-parser2!(parse_relative_location_path_raw(i, sm, start_point: SM::Exp) -> PRO<SM::Exp> {
-    parse_step(i, sm)?.failible_map(|step| {
-        let mut steps = vec![step];
-        while consume_slash(i) {
-            if let Some(next) = parse_step(i, sm)? { steps.push(next) }
-            else { return Err(TrailingSlash) }
-        }
+expr_parser!(parse_relative_location_path_raw(i, alloc, start_point: A::Expr) {
+    failible_map(parse_step(i, alloc)?, |step| {
+        let iter = itertools::unfold(Some(step), |init|
+            if let Some(step) = init.take() {
+                Some(Ok(step))
+            } else if consume_slash(i) {
+                invert_opt_res(parse_step(i, alloc),
+                    || Some(Err(TrailingSlash)))
+            } else { None }
+        );
 
-        Ok(Some(SM::Exp::new_path(sm.new(start_point),
-            sm.new_steps(steps))))
+        alloc.alloc_steps(iter).map(|steps|
+            Some(A::Expr::new_path(alloc.alloc(start_point), steps)))
     })
 });
 
-parser2!(parse_step(i, sm) -> ParseResult<Option<<SM::Exp as Expr>::Steps>> {
+parser!(parse_step(i, alloc) -> ParseResult<Option<<A::Expr as Expr>::Steps>> {
     let axis = parse_axis(i)?;
 
-    let node_test = if let Some(test) = parse_node_test(i, sm)? { Some(test) }
-                    else { default_node_test(i, sm, axis)? };
+    let node_test = if let Some(test) = parse_node_test(i, alloc)? { Some(test) }
+                    else { default_node_test(i, alloc, axis)? };
 
-    node_test.failible_map(|nt| parse_predicates(i, sm).map(|predicates|
-        Some(<SM::Exp as Expr>::Steps::new_steps(axis, nt,
-            sm.new_exprs(predicates)))
+    failible_map(node_test, |nt| parse_predicates(i, alloc).map(|predicates|
+        Some(<A::Expr as Expr>::Steps::new_steps(axis, nt, predicates))
     ))
 });
 
-parser2!(parse_predicates(i, sm) -> ParseResult<Vec<SM::Exp>> {
-    let mut predicates = Vec::new();
-    while let Some(predicate) = parse_predicate_expression(i, sm)? {
-        predicates.push(predicate)
+struct Predicates<'input, 'alloc, 'b, 'c, I, A>
+where
+    'input: 'alloc,
+    I: Iterator<Item = LexerResult<'input>> + 'input + 'b,
+    A: Allocator<'alloc> + 'c
+{
+    source: TokenSource<'b, I>,
+    alloc: &'c A,
+    dummy: PhantomData<&'alloc ()>
+}
+
+impl<'input, 'alloc, 'b, 'c, I, A> Predicates<'input, 'alloc, 'b, 'c, I, A>
+where
+    I: Iterator<Item = LexerResult<'input>>,
+    A: Allocator<'alloc>,
+{
+    fn new(source: TokenSource<'b, I>, alloc: &'c A) -> Self {
+        Predicates {
+            source: source,
+            alloc: alloc,
+            dummy: PhantomData,
+        }
     }
-    Ok(predicates)
+}
+
+impl<'input, 'alloc, 'b, 'c, I, A> Iterator
+for Predicates<'input, 'alloc, 'b, 'c, I, A>
+where
+    'input: 'alloc,
+    I: Iterator<Item = LexerResult<'input>>,
+    A: Allocator<'alloc> + 'alloc,
+{
+    type Item = ParseResult<A::Expr>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        invert_opt_res(parse_predicate_expression(self.source, self.alloc),
+            || None)
+    }
+}
+
+parser!(parse_predicates(i, alloc)
+    -> ParseResult<<A::Expr as Expr>::ExprList>
+{
+    alloc.alloc_list(Predicates::new(i, alloc))
 });
 
-parser2!(parse_predicate_expression(i, sm) -> PRO<SM::Exp> {
-    i.consume_if_eq(LeftBracket).failible_map(|_| {
-        parse_expression(i, sm)?.map_or_else(|| Err(EmptyPredicate), |predicate| {
-            i.consume(RightBracket)?;
-            Ok(Some(predicate))
-        })
-    })
+expr_parser!(parse_predicate_expression(i, alloc) {
+    apply_or_none(i.consume_if_eq(LeftBracket), ||
+        parse_expression(i, alloc)?.map_or_else(|| Err(EmptyPredicate),
+            |predicate| {
+                i.consume(RightBracket)?;
+                Ok(Some(predicate))
+            }
+        )
+    )
 });
 
-parser2!(parse_primary_expression(i, sm) -> PRO<SM::Exp> {
-    first_matching_rule(i, sm, &[
+expr_parser!(parse_primary_expression(i, alloc) {
+    first_matching_rule(i, alloc, &[
         parse_variable_reference,
         parse_nested_expression,
         parse_string_literal,
@@ -603,50 +768,50 @@ parser2!(parse_primary_expression(i, sm) -> PRO<SM::Exp> {
     ])
 });
 
-parser2!(parse_nested_expression(i, sm) -> PRO<SM::Exp> {
-    i.next_token_is(LeftParen)
-     .failible_map(|()| delim_par(i, sm, parse_expression))
+expr_parser!(parse_nested_expression(i, alloc) {
+    apply_or_none(i.next_token_is(LeftParen), ||
+        delim_par(i, alloc, parse_expression))
 });
 
-parser2!(parse_function_call(i, sm) -> PRO<SM::Exp> {
-    consume_match!(i, Token::FnName).failible_map(|name|
-        delim_par(i, sm, parse_function_args)
-            .map(|args| sm.new_exprs(args))
-            .map(|arguments| Some(SM::Exp::new_app(
-                fix_qname(sm, &name), arguments))))
+expr_parser!(parse_function_call(i, alloc) {
+    failible_map(consume_match!(i, Token::FnName), |name|
+        delim_par(i, alloc, parse_function_args)
+            .map(|arguments| Some(A::Expr::new_app(
+                fix_qname(alloc, &name), arguments))))
 });
 
-parser2!(parse_function_args(i, sm) -> ParseResult<Vec<SM::Exp>> {
-    let mut arguments = Vec::new();
-
-    if let Some(arg) = parse_expression(i, sm)? { arguments.push(arg) }
-    else { return Ok(arguments) }
-
-    while i.consume_if_eq(Comma) {
-        if let Some(arg) = parse_expression(i, sm)? { arguments.push(arg) }
-        else { return Err(ArgumentMissing) }
-    }
-
-    Ok(arguments)
+parser!(parse_function_args(i, alloc)
+    -> ParseResult<<A::Expr as Expr>::ExprList>
+{
+    alloc.alloc_list(itertools::unfold(true, |mut first_arg| {
+        if mem::replace(&mut first_arg, false) {
+            invert_opt_res(parse_expression(i, alloc), || None)
+        } else if i.consume_if_eq(Comma) {
+            invert_opt_res(parse_expression(i, alloc),
+                || Some(Err(ArgumentMissing)))
+        } else { None }
+    }))
 });
 
-parser2!(parse_numeric_literal(i, sm) -> PRO<SM::Exp> {
-    Ok(consume_match!(i, Token::Number).map(|x| SM::Exp::new_lit(x.into())))
+expr_parser!(parse_numeric_literal(i, alloc) {
+    #![allow(unused_variables)]
+    Ok(consume_match!(i, Token::Number).map(|x| A::Expr::new_lit(x.into())))
 });
 
-parser2!(parse_string_literal(i, sm) -> PRO<SM::Exp> {
-    Ok(parse_str(i, sm).map(LiteralValue::String).map(SM::Exp::new_lit))
+expr_parser!(parse_string_literal(i, alloc) {
+    Ok(parse_str(i, alloc).map(LiteralValue::String).map(A::Expr::new_lit))
 });
 
-parser2!(parse_variable_reference(i, sm) -> PRO<SM::Exp> {
-    Ok(consume_match!(i, Token::VarRef).map(|qn| fix_qname(sm, &qn))
-        .map(SM::Exp::new_var))
+expr_parser!(parse_variable_reference(i, alloc) {
+    Ok(consume_match!(i, Token::VarRef).map(|qn| fix_qname(alloc, &qn))
+        .map(A::Expr::new_var))
 });
 
-parser2!(default_node_test(i, sm, axis: Axis) -> PRO<NodeTest< <SM::Exp as Expr>::P, <SM::Exp as Expr>::S >>
+parser!(default_node_test(i, alloc, axis: Axis)
+    -> PRONT< <A::Expr as Expr>::P, <A::Expr as Expr>::S >
 {
     Ok(consume_match!(i, Token::NTest)
-        .map(|nt| fix_name_test(sm, &nt)).map(|name|
+        .map(|nt| fix_name_test(alloc, &nt)).map(|name|
         match axis.principal_node_type() {
             PrincipalNodeType::Attribute => NodeTest::Attribute(name),
             PrincipalNodeType::Element => NodeTest::Element(name),
@@ -654,24 +819,25 @@ parser2!(default_node_test(i, sm, axis: Axis) -> PRO<NodeTest< <SM::Exp as Expr>
     }))
 });
 
-parser2!(parse_node_test(i, sm) -> PRO<NodeTest< <SM::Exp as Expr>::P, <SM::Exp as Expr>::S >>
+parser!(parse_node_test(i, alloc)
+    -> PRONT<<A::Expr as Expr>::P, <A::Expr as Expr>::S>
 {
-    consume_match!(i, Token::NType).failible_map(|name| {
-        delim_par(i, sm, |i, sm| Ok(Some(match name {
+    failible_map(consume_match!(i, Token::NType), |name| {
+        delim_par(i, alloc, |i, alloc| Ok(Some(match name {
             NodeType::Text => NodeTest::Text,
             NodeType::Node => NodeTest::Node,
             NodeType::Comment => NodeTest::Comment,
-            NodeType::ProcIns => NodeTest::ProcIns(parse_local(i, sm))
+            NodeType::ProcIns => NodeTest::ProcIns(parse_local(i, alloc))
         })))
     })
 });
 
-parser2!(parse_str(i, sm) -> Option<<SM::Exp as Expr>::L> {
-    consume_match!(i, Token::Literal).map(|s| sm.new_lit(s))
+parser!(parse_str(i, alloc) -> Option<<A::Expr as Expr>::L> {
+    consume_match!(i, Token::Literal).map(|s| alloc.alloc_lit(s))
 });
 
-parser2!(parse_local(i, sm) -> Option<<SM::Exp as Expr>::S> {
-    consume_match!(i, Token::Literal).map(|s| sm.new_local(s))
+parser!(parse_local(i, alloc) -> Option<<A::Expr as Expr>::S> {
+    consume_match!(i, Token::Literal).map(|s| alloc.alloc_local(s))
 });
 
 basic_parser!(parse_axis(i) -> ParseResult<Axis> {
@@ -691,34 +857,6 @@ basic_parser!(parse_axis(i) -> ParseResult<Axis> {
         AxisName::Following => Axis::Following,
     }))
 });
-
-trait FailibleMap<T> {
-    fn failible_map<F, U, E>(self, F) -> Result<Option<U>, E>
-    where
-        F: FnOnce(T) -> Result<Option<U>, E>;
-}
-
-impl<T> FailibleMap<T> for Option<T> {
-    fn failible_map<F, U, E>(self, cont: F) -> Result<Option<U>, E>
-    where
-        F: FnOnce(T) -> Result<Option<U>, E>,
-    {
-        self.map_or_else(|| Ok(None), cont)
-    }
-}
-
-impl FailibleMap<()> for bool {
-    fn failible_map<F, U, E>(self, cont: F) -> Result<Option<U>, E>
-    where
-        F: FnOnce(()) -> Result<Option<U>, E>,
-    {
-        if self {
-            cont(())
-        } else {
-            Ok(None)
-        }
-    }
-}
 
 use super::lexer::Lexer;
 use super::lexer_deabbr::LexerDeabbreviator;
@@ -743,9 +881,9 @@ mod test {
         ($($e:expr),+,) => (tokens!($($e),+))
     );
 
-    fn parse_raw<'a, I>(input: I) -> ParseResult<ExprB>
+    fn parse_raw<'input, I>(input: I) -> ParseResult<ExprB>
     where
-        I: IntoIterator<Item = LexerResult<'a>>
+        I: IntoIterator<Item = LexerResult<'input>> + 'input
     {
         Parser::new(BSM::default()).parse_iter(input.into_iter())
     }

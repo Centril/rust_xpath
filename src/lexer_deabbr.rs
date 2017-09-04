@@ -107,7 +107,9 @@ impl<I> LexerDeabbreviator<I> {
 //============================================================================//
 
 #[cfg(test)]
-mod tests {
+mod tests {    
+    use test;
+
     use super::*;
     use lexer::Error;
 
@@ -129,8 +131,6 @@ mod tests {
             tests!($($args)*);
         };
     }
-
-    use test;
 
     #[bench]
     fn bench_deabbr(b: &mut test::Bencher) {

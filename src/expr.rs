@@ -1,12 +1,6 @@
 //! Provides the abstract syntax tree (AST) for `XPath` expressions.
 
 //============================================================================//
-// Imports:
-//============================================================================//
-
-use super::str_strategy as ss;
-
-//============================================================================//
 // Expressions, Trait & Type:
 //============================================================================//
 
@@ -15,13 +9,14 @@ use super::str_strategy as ss;
 /// implementation details without duplication.
 ///
 /// This is the (untyped) "tagless final interpreter" version of expressions.
-pub trait Expr : Sized {
+pub trait Expr: Sized {
     /// The type for sub-expressions.
     type ExprSub: AsRef<Self>;
 
     /// The type of a list of sub-expressions.
     type ExprList: AsRef<[Self]>;
 
+    /// The type of Steps.
     type Steps: Steps<Expr = Self>;
 
     /// The type of a list of steps.
@@ -55,9 +50,6 @@ pub trait Expr : Sized {
     /// Constructs a new path expression.
     fn new_path(start: Self::ExprSub, steps: Self::StepsList) -> Self;
 
-    /// Constructs a new filtering expression.
-    fn new_filter(subject: Self::ExprSub, predicate: Self::ExprSub) -> Self;
-
     /// Constructs a new literal expression.
     fn new_lit(lit: LiteralValue<Self::L>) -> Self;
 
@@ -77,10 +69,10 @@ where
     L: AsRef<str>,
 {
     /// A expression made up of a binary operator and its two boxed operands.
-    Bin(BinaryOp, BExpr<P, S, L>, BExpr<P, S, L>),
+    Bin(BinaryOp, Box<ExprB<P, S, L>>, Box<ExprB<P, S, L>>),
 
     /// A negation of a boxed expression.
-    Neg(BExpr<P, S, L>),
+    Neg(Box<ExprB<P, S, L>>),
 
     /// A variable reference expression.
     Var(QName<P, S>),
@@ -89,10 +81,7 @@ where
     Apply(QName<P, S>, Box<[ExprB<P, S, L>]>),
 
     /// A path expression.
-    Path(BExpr<P, S, L>, Box<[StepsB<P, S, L>]>),
-
-    /// A filtering expression of a subject on LHS, and predicate on RHS.
-    Filter(BExpr<P, S, L>, BExpr<P, S, L>),
+    Path(Box<ExprB<P, S, L>>, Box<[StepsB<P, S, L>]>),
 
     /// A literal value expression.
     Literal(LiteralValue<L>),
@@ -126,17 +115,14 @@ where
     Apply(QName<P, S>, &'a [ExprR<'a, P, S, L>]),
 
     /// A path expression.
-    Path(ExprRR<'a, P, S, L>, &'a [StepsB<P, S, L>]),
-    
-    /// A filtering expression of a subject on LHS, and predicate on RHS.
-    Filter(ExprRR<'a, P, S, L>, ExprRR<'a, P, S, L>),
+    Path(ExprRR<'a, P, S, L>, &'a [StepsR<'a, P, S, L>]),
 
     /// A literal value expression.
     Literal(LiteralValue<L>),
 
     /// A context node expression.
     ContextNode,
-    
+
     /// A root node expression.
     RootNode,
 }
@@ -158,17 +144,14 @@ pub enum ExprU<'a, Sub: Expr + 'a> {
     Apply(QName<&'a str, &'a str>, &'a [Sub]),
 
     /// A path expression.
-    Path(&'a Sub, &'a [StepsB<Sub::P, Sub::S, Sub::L>]),
-
-    /// A filtering expression of a subject on LHS, and predicate on RHS.
-    Filter(&'a Sub, &'a Sub),
+    Path(&'a Sub, &'a [Sub::Steps]),
 
     /// A literal value expression.
     Literal(LiteralValue<&'a str>),
 
     /// A context node expression.
     ContextNode,
-    
+
     /// A root node expression.
     RootNode,
 }
@@ -179,9 +162,6 @@ pub enum ExprU<'a, Sub: Expr + 'a> {
 
 /// Shorthand for Box<str>.
 type B = Box<str>;
-
-/// Shorthand for `Box<Expr<...>>`.
-pub(crate) type BExpr<P = B, S = B, L = B> = Box<ExprB<P, S, L>>;
 
 /// Shorthand for `&'a ExprR<'a, ...>`.
 pub(crate) type ExprRR<'a, P, S, L> = &'a ExprR<'a, P, S, L>;
@@ -196,10 +176,10 @@ where
     S: AsRef<str>,
     L: AsRef<str>,
 {
-    type ExprSub = BExpr<P, S, L>;
+    type ExprSub = Box<ExprB<P, S, L>>;
     type ExprList = Box<[ExprB<P, S, L>]>;
     type Steps = StepsB<P, S, L>;
-    type StepsList = Box<[StepsB<P, S, L>]>;
+    type StepsList = Box<[Self::Steps]>;
     type P = P;
     type S = S;
     type L = L;
@@ -212,7 +192,6 @@ where
             Var(ref var) => ExprU::Var(var.borrowed()),
             Apply(ref f, ref a) => ExprU::Apply(f.borrowed(), a),
             Path(ref p, ref ss) => ExprU::Path(p, ss),
-            Filter(ref s, ref p) => ExprU::Filter(s, p),
             Literal(ref lit) => ExprU::Literal(lit.borrowed()),
             ContextNode => ExprU::ContextNode,
             RootNode => ExprU::RootNode,
@@ -239,10 +218,6 @@ where
         ExprB::Path(start, steps)
     }
 
-    fn new_filter(subject: Self::ExprSub, predicate: Self::ExprSub) -> Self {
-        ExprB::Filter(subject, predicate)
-    }
-
     fn new_lit(lit: LiteralValue<Self::L>) -> Self {
         ExprB::Literal(lit)
     }
@@ -256,8 +231,7 @@ where
     }
 }
 
-/*
-impl<'a, P, S, L> ExprT for ExprR<'a, P, S, L>
+impl<'a, P, S, L> Expr for ExprR<'a, P, S, L>
 where
     P: AsRef<str>,
     S: AsRef<str>,
@@ -265,7 +239,8 @@ where
 {
     type ExprSub = &'a ExprR<'a, P, S, L>;
     type ExprList = &'a [ExprR<'a, P, S, L>];
-    type StepsList = &'a [Steps<P, S, L>];
+    type Steps = StepsR<'a, P, S, L>;
+    type StepsList = &'a [Self::Steps];
     type P = P;
     type S = S;
     type L = L;
@@ -277,8 +252,7 @@ where
             Neg(expr) => ExprU::Neg(expr),
             Var(ref var) => ExprU::Var(var.borrowed()),
             Apply(ref f, a) => ExprU::Apply(f.borrowed(), a),
-            Path(p, ref ss) => ExprU::Path(p, &ss),
-            Filter(s, p) => ExprU::Filter(s, p),
+            Path(p, ss) => ExprU::Path(p, ss),
             Literal(ref lit) => ExprU::Literal(lit.borrowed()),
             ContextNode => ExprU::ContextNode,
             RootNode => ExprU::RootNode,
@@ -305,10 +279,6 @@ where
         ExprR::Path(start, steps)
     }
 
-    fn new_filter(subject: Self::ExprSub, predicate: Self::ExprSub) -> Self {
-        ExprR::Filter(subject, predicate)
-    }
-
     fn new_lit(lit: LiteralValue<Self::L>) -> Self {
         ExprR::Literal(lit)
     }
@@ -321,7 +291,6 @@ where
         ExprR::RootNode
     }
 }
-*/
 
 impl<'a, P, S, L> AsRef<ExprR<'a, P, S, L>> for ExprR<'a, P, S, L>
 where
@@ -344,7 +313,8 @@ pub trait Steps: Sized {
     fn new_steps(
         axis: Axis,
         node_test: NodeTest<<Self::Expr as Expr>::P, <Self::Expr as Expr>::S>,
-        predicates: <Self::Expr as Expr>::ExprList) -> Self;
+        predicates: <Self::Expr as Expr>::ExprList,
+    ) -> Self;
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -359,6 +329,18 @@ where
     pub predicates: Box<[ExprB<P, S, L>]>,
 }
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct StepsR<'a, P = B, S = B, L = B>
+where
+    P: AsRef<str> + 'a,
+    S: AsRef<str> + 'a,
+    L: AsRef<str> + 'a,
+{
+    pub axis: Axis,
+    pub node_test: NodeTest<P, S>,
+    pub predicates: &'a [ExprR<'a, P, S, L>],
+}
+
 //============================================================================//
 // Implementations, Steps:
 //============================================================================//
@@ -370,14 +352,37 @@ where
     L: AsRef<str>,
 {
     type Expr = ExprB<P, S, L>;
-    
+
     fn new_steps(
         axis: Axis,
         node_test: NodeTest<<Self::Expr as Expr>::P, <Self::Expr as Expr>::S>,
-        predicates: <Self::Expr as Expr>::ExprList) -> Self
-    {
+        predicates: <Self::Expr as Expr>::ExprList,
+    ) -> Self {
         StepsB {
-            axis, node_test, predicates
+            axis,
+            node_test,
+            predicates,
+        }
+    }
+}
+
+impl<'a, P, S, L> Steps for StepsR<'a, P, S, L>
+where
+    P: AsRef<str> + 'a,
+    S: AsRef<str> + 'a,
+    L: AsRef<str> + 'a,
+{
+    type Expr = ExprR<'a, P, S, L>;
+
+    fn new_steps(
+        axis: Axis,
+        node_test: NodeTest<<Self::Expr as Expr>::P, <Self::Expr as Expr>::S>,
+        predicates: <Self::Expr as Expr>::ExprList,
+    ) -> Self {
+        StepsR {
+            axis,
+            node_test,
+            predicates,
         }
     }
 }
@@ -441,7 +446,7 @@ impl<S: AsRef<str>> LiteralValue<S> {
         match *self {
             Boolean(b) => Boolean(b),
             Number(n) => Number(n),
-            String(ref s) => String(f(s))
+            String(ref s) => String(f(s)),
         }
     }
 }
@@ -539,6 +544,7 @@ pub enum BinaryOp {
     Div,
     Rem,
     Union,
+    Filter,
 }
 
 /// All the core functions `XPath` provides.
@@ -608,40 +614,6 @@ where
     }
 }
 
-
-impl<P, S, L> From<LiteralValue<L>> for ExprB<P, S, L>
-where
-    P: AsRef<str>,
-    S: AsRef<str>,
-    L: AsRef<str>,
-{
-    fn from(x: LiteralValue<L>) -> Self {
-        ExprB::Literal(x)
-    }
-}
-
-impl<P, S, L> From<f64> for ExprB<P, S, L>
-where
-    P: AsRef<str>,
-    S: AsRef<str>,
-    L: AsRef<str>,
-{
-    fn from(x: f64) -> Self {
-        ExprB::Literal(x.into())
-    }
-}
-
-impl<P, S, L> From<QName<P, S>> for ExprB<P, S, L>
-where
-    P: AsRef<str>,
-    S: AsRef<str>,
-    L: AsRef<str>,
-{
-    fn from(x: QName<P, S>) -> Self {
-        ExprB::Var(x)
-    }
-}
-
 //============================================================================//
 // Tests:
 //============================================================================//
@@ -686,11 +658,6 @@ fn expr_size_of() {
     println!(
         "size_of Box<[Expr<P, S, L>]  \t {:?}",
         size_of::<Box<[ExprB<B, B, B>]>>()
-    );
-
-    println!(
-        "size_of Box<Expr>:           \t {:?}",
-        size_of::<BExpr<&str>>()
     );
 
     println!(

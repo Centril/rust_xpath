@@ -219,9 +219,6 @@ fn get_two(i: In) -> OTok<'static> {
     TWO_CHAR_TOKENS.get(i).cloned().map(Const)
 }
 
-/// A lexer matching a star (*) symbol.
-par!(star, In, tag!("*"));
-
 /// A lexer matching a single character token.
 lexer!(lex_single, ExpectedToken, map_opt!(take!(1), get_single));
 
@@ -242,8 +239,8 @@ lexer!(
     ExpectedNamedOperator,
     map!(
         alt_complete!(
-            value!(Multiply, star) | vtag!(Or, "or") | vtag!(And, "and") |
-                vtag!(Remainder, "mod") | vtag!(Divide, "div")
+            vtag!(Multiply, "*") | vtag!(Or, "or") | vtag!(And, "and") | vtag!(Remainder, "mod") |
+                vtag!(Divide, "div")
         ),
         Const
     )
@@ -352,7 +349,7 @@ NameChar       ::= NameStartChar | "-" | "." | [0-9] | #xB7
 NCName         ::= NameStartChar (NameChar)*
 */
 
-fn is_name_char_start(c: char) -> bool {
+pub(crate) fn is_name_char_start(c: char) -> bool {
     match c {
         'A'...'Z' |
         '_'...'_' |
@@ -373,7 +370,7 @@ fn is_name_char_start(c: char) -> bool {
     }
 }
 
-fn is_name_char(c: char) -> bool {
+pub(crate) fn is_name_char(c: char) -> bool {
     is_name_char_start(c) || match c {
         '-'...'-' |
         '.'...'.' |
@@ -395,33 +392,32 @@ fn name_char_start<'a>(i: In<'a>) -> IResult<In<'a>, In<'a>> {
 
 /// A lexer matching an NCName.
 par!(
-    nc_name,
+    lex_nc_name,
     In,
     recognize!(preceded!(name_char_start, take_while_s!(is_name_char)))
 );
 
 /// A lexer matching a prefix.
 par!(
-    prefix,
+    lex_prefix,
     OIn,
-    opt!(terminated!(nc_name, complete!(tag!(":"))))
+    opt!(terminated!(lex_nc_name, complete!(tag!(":"))))
 );
 
 /// A lexer matching a local part.
 par!(
-    local_part,
+    lex_local_part,
     OIn,
-    alt_complete!(value!(None, star) | map!(nc_name, Some))
+    alt_complete!(vtag!(None, "*") | map!(lex_nc_name, Some))
 );
 
 /// A lexer matching a name test.
 lexer!(
     lex_name_test,
     ExpectedNameTest,
-    map!(
-        pair!(prefix, local_part),
-        |(ns, lp)| NTest(NameTest(ns, lp))
-    )
+    map!(pair!(lex_prefix, lex_local_part), |(ns, lp)| {
+        NTest(NameTest::new(ns, lp))
+    })
 );
 
 //============================================================================//
@@ -433,7 +429,7 @@ lexer!(
     lex_function,
     map!(
         terminated!(
-            lerr!(ExpectedQName, qname),
+            lerr!(ExpectedQName, lex_qname),
             lerr!(ExpectedLeftParenthesis, complete!(peek!(tag!("("))))
         ),
         FnName
@@ -445,13 +441,14 @@ lexer!(
 //============================================================================//
 
 /// A lexer matching a QName.
-par!(qname, QName<In>, do_parse!(a: prefix >> b: nc_name >> (QName(a, b))));
+par!(lex_qname, QName<In>,
+do_parse!(a: lex_prefix >> b: lex_nc_name >> (QName::new(a, b))));
 
 // A lexer matching a variable reference.
-lexer!(lex_varref, map!(
+lexer!(lex_var_ref, map!(
     preceded!(
         lerr!(ExpectedVariableReference, tag!("$")),
-        lerr!(ExpectedQName, qname)
+        lerr!(ExpectedQName, lex_qname)
     ),
     VarRef
 ));
@@ -478,7 +475,7 @@ fn lexer_tok(i: In, prefer_op_names: bool) -> IResult<In, StrToken, Error> {
            | lex_node_type
            | lex_function
            | lex_name_test
-           | lex_varref
+           | lex_var_ref
         ),
         whitespace
     )
@@ -508,6 +505,8 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use super::*;
     use super::Error;
 
@@ -515,7 +514,6 @@ mod tests {
 
     type VTok<'a> = Vec<StrToken<'a>>;
 
-    use std::fmt::Debug;
     fn no_complete<T: Debug>(x: T) -> ! {
         panic!("parser did not complete, because:\n{:?}\n", x);
     }
@@ -542,29 +540,31 @@ mod tests {
         };
     }
 
-    fn lpar() -> StrToken<'static> {
-        Const(LeftParen)
-    }
-
-    fn rpar() -> StrToken<'static> {
-        Const(RightParen)
+    macro_rules! exceptionals {
+        (($name: ident, $inp: expr) => $err: expr) => {
+            #[test] fn $name() { assert_eq!(all_tokens_raw($inp), Err($err)); }
+        };
+        (($name: ident, $inp: expr) => $err: expr, $($args:tt)*) => {
+            exceptionals!(($name, $inp) => $err);
+            exceptionals!($($args)*);
+        };
     }
 
     /// Fuses together a token and subsequent vector of tokens into a vector.
     fn pars<'a>(first: StrToken<'a>, args: VTok<'a>) -> VTok<'a> {
-        let mut cont = vec![first, lpar()];
+        let mut cont = vec![first, Const(LeftParen)];
         cont.extend(args);
-        cont.push(rpar());
+        cont.push(Const(RightParen));
         cont
     }
 
     /// Creates a NameTest token out of the namespace/prefix and local part.
     fn ntest<'a>(ns: OIn<'a>, lp: OIn<'a>) -> StrToken<'a> {
-        NTest(NameTest(ns, lp))
+        NTest(NameTest::new(ns, lp))
     }
 
     fn lp(lp: In) -> StrToken {
-        ntest(None, Some(lp))
+        NTest(lp.into())
     }
 
     fn q_lp<'a>(ns: In<'a>, lp: In<'a>) -> StrToken<'a> {
@@ -679,7 +679,7 @@ mod tests {
         use super::*;
 
         fn fun<'a>(ns: OIn<'a>, lp: In<'a>, args: VTok<'a>) -> VTok<'a> {
-            pars(FnName(QName(ns, lp)), args)
+            pars(FnName(QName::new(ns, lp)), args)
         }
 
         tests! {
@@ -715,8 +715,8 @@ mod tests {
     mod var_ref {
         use super::*;
         tests! {
-            (local, "$yo")         => vec![VarRef(QName(None, "yo"))],
-            (ns_local, "$abc:def") => vec![VarRef(QName(Some("abc"), "def"))]
+            (local, "$yo")         => vec![VarRef("yo".into())],
+            (ns_local, "$abc:def") => vec![VarRef(QName::new(Some("abc"), "def"))]
         }
     }
 
@@ -750,17 +750,22 @@ mod tests {
     /// Tests for the special rules of the lexer when it comes to operators.
     mod special {
         use super::*;
+
+        fn bin(lhs: f64, op: CToken, rhs: StrToken) -> Vec<StrToken> {
+            vec![Number(lhs), Const(op), rhs]
+        }
+
         tests! {
             (preceding_token_forces_named_operator_and, "1andz2")
-                => vec![Number(1.0), Const(And), lp("z2")],
+                => bin(1.0, And, lp("z2")),
             (preceding_token_forces_named_operator_or, "2oror")
-                => vec![Number(2.0), Const(Or), lp("or")],
+                => bin(2.0, Or, lp("or")),
             (preceding_token_forces_named_operator_mod, "3moddiv")
-                => vec![Number(3.0), Const(Remainder), lp("div")],
+                => bin(3.0, Remainder, lp("div")),
             (preceding_token_forces_named_operator_div, "1divz2")
-                => vec![Number(1.0), Const(Divide), lp("z2")],
+                => bin(1.0, Divide, lp("z2")),
             (preceding_token_forces_named_operator_multiply, "1*2")
-                => vec![Number(1.0), Const(Multiply), Number(2.0)]
+                => bin(1.0, Multiply, Number(2.0))
         }
     }
 
@@ -768,21 +773,13 @@ mod tests {
     mod execption_thrown {
         use super::*;
 
-        #[test]
-        fn when_nothing_was_tokenized() {
-            assert_eq!(all_tokens_raw("!"), Err(UnableToCreateToken));
-        }
-
-        #[test]
-        fn when_name_test_has_no_local_name() {
-            assert_eq!(all_tokens_raw("ns:"), Err(UnableToCreateToken));
-        }
-
-        #[test]
-        fn when_quote_characters_mismatched() {
-            assert_eq!(all_tokens_raw("'hello\""), Err(MismatchedQuoteCharacters));
+        exceptionals! {
+            (when_nothing_was_tokenized, "!")
+                => UnableToCreateToken,
+            (when_name_test_has_no_local_name, "ns:")
+                => UnableToCreateToken,
+            (when_quote_characters_mismatched, "'hello\"")
+                => MismatchedQuoteCharacters
         }
     }
-
-    mod compound {}
 }

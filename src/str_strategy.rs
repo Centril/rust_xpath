@@ -28,6 +28,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::hash::Hash;
 use std::ops::Deref;
+use std::borrow::Borrow;
 
 use unreachable::UncheckedOptionExt;
 
@@ -67,12 +68,13 @@ where
     Store: Eq + Hash,
 {
     /// Provides an immutable view of the backing `HashSet` storage.
-    fn store<'store>(&'store self) -> &'store HashSet<Store>;
+    fn store(& self) -> &HashSet<Store>;
 }
 
 macro_rules! caching_strategy {
     ($recv: ty, $store: ty) => {
         impl $recv {
+            #[cfg_attr(feature = "cargo-clippy", allow(mut_from_ref))]
             unsafe fn store_mut(&self) -> &mut HashSet<$store> {
                 self.0.get().as_mut().unchecked_unwrap()
             }
@@ -152,14 +154,9 @@ caching_strategy!(HoldingRefStrategy, Box<str>);
 ///
 /// [`HoldingRef`]: struct.HoldingRefStrategy.html
 pub struct HoldingRef {
-    parent: HRSInside,
+    #[allow(dead_code)]
+    parent: HRSInside, // Only used as a drop guard.
     item: *const str,
-}
-
-impl AsRef<str> for HoldingRef {
-    fn as_ref(&self) -> &str {
-        unsafe { &*self.item }
-    }
 }
 
 impl Deref for HoldingRef {
@@ -167,6 +164,18 @@ impl Deref for HoldingRef {
 
     fn deref(&self) -> &Self::Target {
         unsafe { &*self.item }
+    }
+}
+
+impl AsRef<str> for HoldingRef {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+impl Borrow<str> for HoldingRef {
+    fn borrow(&self) -> &str {
+        self
     }
 }
 

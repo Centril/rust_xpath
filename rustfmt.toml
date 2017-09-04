@@ -1,0 +1,11 @@
+max_width     = 80
+wrap_comments = true
+
+reorder_imports_in_group   = true
+reorder_imported_names     = true
+
+use_try_shorthand            = true
+chain_indent                 = "Visual"
+fn_single_line               = true
+condense_wildcard_suffixes   = true
+struct_field_align_threshold = 20

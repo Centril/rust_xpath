@@ -4,13 +4,14 @@
 
 use super::util::to_boxed_str;
 use self::Token::*;
+use self::CToken::*;
 
 //============================================================================//
 // Token types:
 //============================================================================//
 
 /// Models `[6] AxisName`.
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AxisName {
     Ancestor,         // ancestor::
     AncestorOrSelf,   // ancestor-or-self::
@@ -28,7 +29,7 @@ pub enum AxisName {
 }
 
 /// Models `[38] NodeType`.
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeType {
     Comment,
     Node,
@@ -36,18 +37,24 @@ pub enum NodeType {
     ProcIns,
 }
 
-/// Models `[37] NameTest`.
-#[derive(PartialEq, Clone, Debug)]
-pub struct NameTest<S: AsRef<str>>(pub Option<S>, pub Option<S>);
-
 /// Models a [`QName`].
 ///
 /// [`QName`]: https://www.w3.org/TR/REC-xml-names/#ns-qualnames
-#[derive(PartialEq, Clone, Debug)]
-pub struct QName<S: AsRef<str>>(pub Option<S>, pub S);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QName<S: AsRef<str>> {
+    pub prefix: Option<S>,
+    pub local: S,
+}
+
+/// Models `[37] NameTest`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NameTest<S: AsRef<str>> {
+    pub prefix: Option<S>,
+    pub local: Option<S>,
+}
 
 /// Models: Operator + ( + ) + | + [ + ] + . + .. + @ + ,
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CToken {
     And,                // and
     AtSign,             // @
@@ -76,7 +83,7 @@ pub enum CToken {
 }
 
 /// Models the lexical structure of xpath, `[28] ExprToken`.
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Token<S: AsRef<str>> {
     // All constants: Operators + what's left.
     Const(CToken),
@@ -107,15 +114,27 @@ pub enum Token<S: AsRef<str>> {
 // Implementations
 //============================================================================//
 
+impl<S: AsRef<str>> NameTest<S> {
+    pub fn new(prefix: Option<S>, local: Option<S>) -> Self {
+        Self { prefix, local }
+    }
+}
+
+impl<S: AsRef<str>> QName<S> {
+    pub fn new(prefix: Option<S>, local: S) -> Self {
+        Self { prefix, local }
+    }
+}
+
 impl<S: AsRef<str>> From<S> for NameTest<S> {
     fn from(local_part: S) -> Self {
-        NameTest(None, Some(local_part))
+        Self::new(None, Some(local_part))
     }
 }
 
 impl<S: AsRef<str>> From<S> for QName<S> {
     fn from(local_part: S) -> Self {
-        QName(None, local_part)
+        Self::new(None, local_part)
     }
 }
 
@@ -123,7 +142,7 @@ impl<S: AsRef<str>> Token<S> {
     /// Yields true if token precedes a node test.
     pub fn precedes_node_test(&self) -> bool {
         match *self {
-            Const(CToken::AtSign) | Axis(..) => true,
+            Const(AtSign) | Axis(..) => true,
             _ => false,
         }
     }
@@ -132,7 +151,7 @@ impl<S: AsRef<str>> Token<S> {
     /// must come after this.
     pub fn precedes_expression(&self) -> bool {
         match *self {
-            Const(CToken::LeftParen) | Const(CToken::LeftBracket) => true,
+            Const(LeftParen) | Const(LeftBracket) => true,
             _ => false,
         }
     }
@@ -141,29 +160,28 @@ impl<S: AsRef<str>> Token<S> {
     pub fn is_operator(&self) -> bool {
         match *self {
             Const(ref c) => match *c {
-                CToken::Slash |
-                CToken::DoubleSlash |
-                CToken::PlusSign |
-                CToken::MinusSign |
-                CToken::Pipe |
-                CToken::Equal |
-                CToken::NotEqual |
-                CToken::LessThan |
-                CToken::LessThanOrEqual |
-                CToken::GreaterThan |
-                CToken::GreaterThanOrEqual |
-                CToken::And |
-                CToken::Or |
-                CToken::Remainder |
-                CToken::Divide |
-                CToken::Multiply => true,
+                Slash |
+                DoubleSlash |
+                PlusSign |
+                MinusSign |
+                Pipe |
+                Equal |
+                NotEqual |
+                LessThan |
+                LessThanOrEqual |
+                GreaterThan |
+                GreaterThanOrEqual |
+                And |
+                Or |
+                Remainder |
+                Divide |
+                Multiply => true,
                 _ => false,
             },
             _ => false,
         }
     }
 }
-
 
 //============================================================================//
 // Functor API
@@ -176,7 +194,7 @@ impl<S: AsRef<str>> NameTest<S> {
         T: AsRef<str>,
         F: Fn(S) -> T,
     {
-        NameTest(self.0.map(&f), self.1.map(&f))
+        NameTest::new(self.prefix.map(&f), self.local.map(&f))
     }
 }
 
@@ -187,7 +205,7 @@ impl<S: AsRef<str>> QName<S> {
         T: AsRef<str>,
         F: Fn(S) -> T,
     {
-        QName(self.0.map(&f), f(self.1))
+        QName::new(self.prefix.map(&f), f(self.local))
     }
 }
 
