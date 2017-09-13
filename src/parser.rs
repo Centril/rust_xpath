@@ -14,7 +14,7 @@ use super::expr::*;
 use super::tokens;
 use super::tokens::*;
 use super::tokens::CToken::*;
-use super::lexer::{self, LexerResult, StrToken};
+use super::lexer::{self, LexerResult};
 
 use self::Error::*;
 
@@ -136,7 +136,7 @@ where
     pub fn parse_iter<'input, I>(&self, source: I) -> ParseResult<A::Expr>
     where
         'input: 'alloc,
-        I: Iterator<Item = LexerResult<'input>> + 'input,
+        I: Iterator<Item = LexerResult<'input>> + 'input + Clone,
     {
         let mut source = source.peekable();
 
@@ -369,7 +369,7 @@ fn fix_qname<'alloc, A>(sm: &A, qn: &tokens::QName<&'alloc str>)
 where
     A: Allocator<'alloc>
 {
-    expr::QName(qn.prefix, qn.local)
+    expr::QName::new(qn.prefix, qn.local)
         .map(|s| sm.alloc_prefix(s), |s| sm.alloc_local(s))
 }
 
@@ -435,7 +435,8 @@ macro_rules! basic_parser {
     ($name: ident ($source: ident $(, $par: ident : $tpar: ty)*) -> $tret: ty { $($args:tt)* }) => {
         fn $name<'input, I>($source: TokenSource<I> $(, $par : $tpar)*) -> $tret
         where
-            I: Iterator<Item = LexerResult<'input>> + 'input,
+            // TODO: Remove Clone,
+            I: Iterator<Item = LexerResult<'input>> + 'input + Clone,
         {
             $($args)*
         }
@@ -447,7 +448,7 @@ macro_rules! parser {
         fn $name<'input, 'alloc, I, A>($source: TokenSource<I>, $alloc: &A $(, $par : $tpar)*) -> $tret
         where
             'input: 'alloc,
-            I: Iterator<Item = LexerResult<'input>> + 'input,
+            I: Iterator<Item = LexerResult<'input>> + 'input + Clone,
             A: Allocator<'alloc> + 'alloc,
         {
             $($args)*
@@ -460,7 +461,7 @@ macro_rules! expr_parser {
         fn $name<'input, 'alloc, I, A>($source: TokenSource<I>, $alloc: &A $(, $par : $tpar)*) -> PRO<A::Expr>
         where
             'input: 'alloc,
-            I: Iterator<Item = LexerResult<'input>> + 'input,
+            I: Iterator<Item = LexerResult<'input>> + 'input + Clone,
             A: Allocator<'alloc> + 'alloc,
         {
             $($args)*
@@ -730,7 +731,7 @@ impl<'input, 'alloc, 'b, 'c, I, A> Iterator
 for Predicates<'input, 'alloc, 'b, 'c, I, A>
 where
     'input: 'alloc,
-    I: Iterator<Item = LexerResult<'input>>,
+    I: Iterator<Item = LexerResult<'input>> + Clone,
     A: Allocator<'alloc> + 'alloc,
 {
     type Item = ParseResult<A::Expr>;
@@ -774,6 +775,7 @@ expr_parser!(parse_nested_expression(i, alloc) {
 });
 
 expr_parser!(parse_function_call(i, alloc) {
+    // TODO: fix change in lexer (no LeftParen)!
     failible_map(consume_match!(i, Token::FnName), |name|
         delim_par(i, alloc, parse_function_args)
             .map(|arguments| Some(A::Expr::new_app(
@@ -883,7 +885,8 @@ mod test {
 
     fn parse_raw<'input, I>(input: I) -> ParseResult<ExprB>
     where
-        I: IntoIterator<Item = LexerResult<'input>> + 'input
+        I: IntoIterator<Item = LexerResult<'input>> + 'input,
+        <I as IntoIterator>::IntoIter: Clone
     {
         Parser::new(BSM::default()).parse_iter(input.into_iter())
     }
@@ -968,5 +971,19 @@ mod test {
                 Err(UnableToCreateToken)
             ]);
         }
+    }
+
+    #[test]
+    fn stuff() {
+        let parser = Parser::new(BSM::default());
+        println!("{:?}", parser.parse("//.").unwrap());
+        /*
+        println!("{:?}", parser.parse("-1|2").unwrap());
+        println!("{:?}", parser.parse("-(1 or 2)").unwrap());
+        println!("{:?}", parser.parse("-1 or 2").unwrap());
+        println!("{:?}", parser.parse("1 and 2 and 3").unwrap());
+        println!("{:?}", parser.parse("1 and (2 and 3)").unwrap());
+        println!("{:?}", parser.parse("(1 or 2) and 3").unwrap());
+        */
     }
 }

@@ -35,8 +35,10 @@ pub trait Expr: Sized {
     /// No heap allocation may occur as a result of calling this.
     fn to_initial(&self) -> ExprU<Self>;
 
-    /// Constructs a new expression from a binary operator and its two operands.
-    fn new_bin(op: BinaryOp, left: Self::ExprSub, right: Self::ExprSub) -> Self;
+    /// Constructs a new expression from a binary operator and its two
+    /// operands.
+    fn new_bin(op: BinaryOp, left: Self::ExprSub, right: Self::ExprSub)
+        -> Self;
 
     /// Constructs a new negation of a given expression.
     fn new_neg(l: Self::ExprSub) -> Self;
@@ -68,7 +70,8 @@ where
     S: AsRef<str>,
     L: AsRef<str>,
 {
-    /// A expression made up of a binary operator and its two boxed operands.
+    /// A expression made up of a binary operator and its two boxed
+    /// operands.
     Bin(BinaryOp, Box<ExprB<P, S, L>>, Box<ExprB<P, S, L>>),
 
     /// A negation of a boxed expression.
@@ -102,7 +105,8 @@ where
     S: AsRef<str> + 'a,
     L: AsRef<str> + 'a,
 {
-    /// A expression made up of a binary operator and its two boxed operands.
+    /// A expression made up of a binary operator and its two boxed
+    /// operands.
     Bin(BinaryOp, ExprRR<'a, P, S, L>, ExprRR<'a, P, S, L>),
 
     /// A negation of an expression.
@@ -131,7 +135,8 @@ where
 /// This allows creating expressions without any heap allocation at all.
 #[derive(PartialEq, Clone, Debug)]
 pub enum ExprU<'a, Sub: Expr + 'a> {
-    /// A expression made up of a binary operator and its two boxed operands.
+    /// A expression made up of a binary operator and its two boxed
+    /// operands.
     Bin(BinaryOp, &'a Sub, &'a Sub),
 
     /// A negation of an expression.
@@ -198,17 +203,17 @@ where
         }
     }
 
-    fn new_bin(op: BinaryOp, left: Self::ExprSub, right: Self::ExprSub) -> Self {
+    fn new_bin(
+        op: BinaryOp,
+        left: Self::ExprSub,
+        right: Self::ExprSub,
+    ) -> Self {
         ExprB::Bin(op, left, right)
     }
 
-    fn new_neg(expr: Self::ExprSub) -> Self {
-        ExprB::Neg(expr)
-    }
+    fn new_neg(expr: Self::ExprSub) -> Self { ExprB::Neg(expr) }
 
-    fn new_var(var: QName<Self::P, Self::S>) -> Self {
-        ExprB::Var(var)
-    }
+    fn new_var(var: QName<Self::P, Self::S>) -> Self { ExprB::Var(var) }
 
     fn new_app(fun: QName<Self::P, Self::S>, args: Self::ExprList) -> Self {
         ExprB::Apply(fun, args)
@@ -218,17 +223,11 @@ where
         ExprB::Path(start, steps)
     }
 
-    fn new_lit(lit: LiteralValue<Self::L>) -> Self {
-        ExprB::Literal(lit)
-    }
+    fn new_lit(lit: LiteralValue<Self::L>) -> Self { ExprB::Literal(lit) }
 
-    fn new_context_node() -> Self {
-        ExprB::ContextNode
-    }
+    fn new_context_node() -> Self { ExprB::ContextNode }
 
-    fn new_root_node() -> Self {
-        ExprB::RootNode
-    }
+    fn new_root_node() -> Self { ExprB::RootNode }
 }
 
 impl<'a, P, S, L> Expr for ExprR<'a, P, S, L>
@@ -259,17 +258,17 @@ where
         }
     }
 
-    fn new_bin(op: BinaryOp, left: Self::ExprSub, right: Self::ExprSub) -> Self {
+    fn new_bin(
+        op: BinaryOp,
+        left: Self::ExprSub,
+        right: Self::ExprSub,
+    ) -> Self {
         ExprR::Bin(op, left, right)
     }
 
-    fn new_neg(expr: Self::ExprSub) -> Self {
-        ExprR::Neg(expr)
-    }
+    fn new_neg(expr: Self::ExprSub) -> Self { ExprR::Neg(expr) }
 
-    fn new_var(var: QName<Self::P, Self::S>) -> Self {
-        ExprR::Var(var)
-    }
+    fn new_var(var: QName<Self::P, Self::S>) -> Self { ExprR::Var(var) }
 
     fn new_app(fun: QName<Self::P, Self::S>, args: Self::ExprList) -> Self {
         ExprR::Apply(fun, args)
@@ -279,17 +278,11 @@ where
         ExprR::Path(start, steps)
     }
 
-    fn new_lit(lit: LiteralValue<Self::L>) -> Self {
-        ExprR::Literal(lit)
-    }
+    fn new_lit(lit: LiteralValue<Self::L>) -> Self { ExprR::Literal(lit) }
 
-    fn new_context_node() -> Self {
-        ExprR::ContextNode
-    }
+    fn new_context_node() -> Self { ExprR::ContextNode }
 
-    fn new_root_node() -> Self {
-        ExprR::RootNode
-    }
+    fn new_root_node() -> Self { ExprR::RootNode }
 }
 
 impl<'a, P, S, L> AsRef<ExprR<'a, P, S, L>> for ExprR<'a, P, S, L>
@@ -298,9 +291,7 @@ where
     S: AsRef<str>,
     L: AsRef<str>,
 {
-    fn as_ref(&self) -> &Self {
-        self
-    }
+    fn as_ref(&self) -> &Self { self }
 }
 
 //============================================================================//
@@ -324,8 +315,8 @@ where
     S: AsRef<str>,
     L: AsRef<str>,
 {
-    pub axis: Axis,
-    pub node_test: NodeTest<P, S>,
+    pub axis:       Axis,
+    pub node_test:  NodeTest<P, S>,
     pub predicates: Box<[ExprB<P, S, L>]>,
 }
 
@@ -336,8 +327,8 @@ where
     S: AsRef<str> + 'a,
     L: AsRef<str> + 'a,
 {
-    pub axis: Axis,
-    pub node_test: NodeTest<P, S>,
+    pub axis:       Axis,
+    pub node_test:  NodeTest<P, S>,
     pub predicates: &'a [ExprR<'a, P, S, L>],
 }
 
@@ -388,7 +379,7 @@ where
 }
 
 //============================================================================//
-// Basic Types & Traits:
+// Basic types:
 //============================================================================//
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -413,118 +404,6 @@ pub enum Axis {
     Preceding,
     PrecedingSibling,
     SelfAxis,
-}
-
-/// A literal value that `XPath` supports.
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum LiteralValue<L = B>
-where
-    L: AsRef<str>,
-{
-    /// A literal boolean.
-    Boolean(bool),
-
-    /// A literal number.
-    Number(f64),
-
-    /// A literal string.
-    String(L),
-}
-
-//============================================================================//
-// Functor API
-//============================================================================//
-
-impl<S: AsRef<str>> LiteralValue<S> {
-    /// Applies a pure function mapping the string type of the NameTest.
-    pub fn map<'a, F, T: 'a>(&'a self, f: F) -> LiteralValue<T>
-    where
-        T: AsRef<str>,
-        F: Fn(&'a S) -> T,
-    {
-        use self::LiteralValue::*;
-        match *self {
-            Boolean(b) => Boolean(b),
-            Number(n) => Number(n),
-            String(ref s) => String(f(s)),
-        }
-    }
-}
-
-impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
-    /// Applies pure functions mapping the string types of the QName.
-    pub fn map<'a, F, T, G, U>(&'a self, f: F, g: G) -> QName<T, U>
-    where
-        T: AsRef<str>,
-        U: AsRef<str>,
-        F: Fn(&'a P) -> T,
-        G: Fn(&'a S) -> U,
-    {
-        QName(self.0.as_ref().map(&f), g(&self.1))
-    }
-}
-
-impl<P: AsRef<str>, S: AsRef<str>> NameTest<P, S> {
-    /// Applies pure functions mapping the string types of the NameTest.
-    pub fn map<'a, F, T, G, U>(&'a self, f: F, g: G) -> NameTest<T, U>
-    where
-        T: AsRef<str>,
-        U: AsRef<str>,
-        F: Fn(&'a P) -> T,
-        G: Fn(&'a S) -> U,
-    {
-        NameTest {
-            prefix: self.prefix.as_ref().map(&f),
-            local: self.local.as_ref().map(&g),
-        }
-    }
-}
-
-//============================================================================//
-// Functor API, AsRef<str> -> &str :
-//============================================================================//
-
-impl<S: AsRef<str>> LiteralValue<S> {
-    /// Converts the string inside the literal value to a string slice.
-    pub fn borrowed(&self) -> LiteralValue<&str> {
-        self.map(|s| s.as_ref())
-    }
-}
-
-impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
-    /// Converts the strings inside the qname value to string slices.
-    pub fn borrowed(&self) -> QName<&str, &str> {
-        self.map(|s| s.as_ref(), |s| s.as_ref())
-    }
-}
-
-
-
-
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub struct NameTest<P = B, S = B>
-where
-    P: AsRef<str>,
-    S: AsRef<str>,
-{
-    pub prefix: Option<P>,
-    pub local: Option<S>,
-}
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum NodeTest<P = B, S = B>
-where
-    P: AsRef<str>,
-    S: AsRef<str>,
-{
-    Node,
-    Text,
-    Comment,
-    ProcIns(Option<S>),
-    Attribute(NameTest<P, S>),
-    Namespace(NameTest<P, S>),
-    Element(NameTest<P, S>),
 }
 
 /// Denotes what binary operator an expression is.
@@ -584,11 +463,160 @@ pub enum CoreFunction {
     Round,
 }
 
+/// A literal value that `XPath` supports.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum LiteralValue<L = B>
+where
+    L: AsRef<str>,
+{
+    /// A literal boolean.
+    Boolean(bool),
+
+    /// A literal number.
+    Number(f64),
+
+    /// A literal string.
+    String(L),
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub struct NameTest<P = B, S = B>
+where
+    P: AsRef<str>,
+    S: AsRef<str>,
+{
+    pub prefix: Option<P>,
+    pub local:  Option<S>,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum NodeTest<P = B, S = B>
+where
+    P: AsRef<str>,
+    S: AsRef<str>,
+{
+    Node,
+    Text,
+    Comment,
+    ProcIns(Option<S>),
+    Attribute(NameTest<P, S>),
+    Namespace(NameTest<P, S>),
+    Element(NameTest<P, S>),
+}
+
 /// Models a [`QName`].
 ///
 /// [`QName`]: https://www.w3.org/TR/REC-xml-names/#ns-qualnames
 #[derive(PartialEq, Clone, Debug)]
-pub struct QName<P: AsRef<str> = B, S: AsRef<str> = B>(pub Option<P>, pub S);
+pub struct QName<P = B, S = B>
+where
+    P: AsRef<str>,
+    S: AsRef<str>,
+{
+    pub prefix: Option<P>,
+    pub local:  S,
+}
+
+//============================================================================//
+// Functor API
+//============================================================================//
+
+impl<L: AsRef<str>> LiteralValue<L> {
+    /// Applies a pure function mapping the string type of the NameTest.
+    pub fn map<'a, F, T: 'a>(&'a self, f: F) -> LiteralValue<T>
+    where
+        T: AsRef<str>,
+        F: Fn(&'a L) -> T,
+    {
+        use self::LiteralValue::*;
+        match *self {
+            Boolean(b) => Boolean(b),
+            Number(n) => Number(n),
+            String(ref s) => String(f(s)),
+        }
+    }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
+    /// Applies pure functions mapping the string types of the QName.
+    pub fn map<'a, F, T, G, U>(&'a self, f: F, g: G) -> QName<T, U>
+    where
+        T: AsRef<str>,
+        U: AsRef<str>,
+        F: Fn(&'a P) -> T,
+        G: Fn(&'a S) -> U,
+    {
+        QName::new(self.prefix.as_ref().map(&f), g(&self.local))
+    }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> NameTest<P, S> {
+    /// Applies pure functions mapping the string types of the NameTest.
+    pub fn map<'a, F, T, G, U>(&'a self, f: F, g: G) -> NameTest<T, U>
+    where
+        T: AsRef<str>,
+        U: AsRef<str>,
+        F: Fn(&'a P) -> T,
+        G: Fn(&'a S) -> U,
+    {
+        NameTest {
+            prefix: self.prefix.as_ref().map(&f),
+            local:  self.local.as_ref().map(&g),
+        }
+    }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> NodeTest<P, S> {
+    /// Applies pure functions mapping the string types of the NodeTest.
+    pub fn map<'a, F, T, G, U>(&'a self, f: F, g: G) -> NodeTest<T, U>
+    where
+        T: AsRef<str>,
+        U: AsRef<str>,
+        F: Fn(&'a P) -> T,
+        G: Fn(&'a S) -> U,
+    {
+        use self::NodeTest::*;
+        match *self {
+            Node => Node,
+            Text => Text,
+            Comment => Comment,
+            ProcIns(ref op) => ProcIns(op.as_ref().map(&g)),
+            Attribute(ref nt) => Attribute(nt.map(f, g)),
+            Namespace(ref nt) => Namespace(nt.map(f, g)),
+            Element(ref nt) => Element(nt.map(f, g)),
+        }
+    }
+}
+
+//============================================================================//
+// Functor API, AsRef<str> -> &str :
+//============================================================================//
+
+impl<S: AsRef<str>> LiteralValue<S> {
+    /// Converts the string inside the literal value to a string slice.
+    pub fn borrowed(&self) -> LiteralValue<&str> { self.map(|s| s.as_ref()) }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
+    /// Converts the strings inside the qname value to string slices.
+    pub fn borrowed(&self) -> QName<&str, &str> {
+        self.map(|s| s.as_ref(), |s| s.as_ref())
+    }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> NameTest<P, S> {
+    /// Converts the strings inside the name test value to string slices.
+    pub fn borrowed(&self) -> NameTest<&str, &str> {
+        self.map(|s| s.as_ref(), |s| s.as_ref())
+    }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> NodeTest<P, S> {
+    /// Converts the strings inside the node test value to string slices.
+    pub fn borrowed(&self) -> NodeTest<&str, &str> {
+        self.map(|s| s.as_ref(), |s| s.as_ref())
+    }
+}
 
 //============================================================================//
 // Implementations:
@@ -605,20 +633,21 @@ impl Axis {
     }
 }
 
+impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
+    /// Constructs a new QName.
+    pub fn new(prefix: Option<P>, local: S) -> Self { Self { prefix, local } }
+}
+
 impl<L> From<f64> for LiteralValue<L>
 where
     L: AsRef<str>,
 {
-    fn from(x: f64) -> Self {
-        LiteralValue::Number(x)
-    }
+    fn from(x: f64) -> Self { LiteralValue::Number(x) }
 }
 
 //============================================================================//
 // Tests:
 //============================================================================//
-
-
 
 #[test]
 fn expr_size_of() {

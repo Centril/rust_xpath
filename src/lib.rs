@@ -1,15 +1,21 @@
 #![plugin(phf_macros)]
 #![feature(plugin)]
 #![cfg_attr(test, feature(test))]
-#![cfg_attr(test, feature(plugin))]
-#![cfg_attr(test, plugin(quickcheck_macros))]
+#![cfg_attr(test, feature(inclusive_range_syntax))]
 #![allow(dead_code)]
 
-#[cfg(test)]
-extern crate quickcheck;
+#[macro_use]
+extern crate cfg_if;
 
-#[cfg(test)]
-extern crate test;
+cfg_if! {
+    if #[cfg(test)] {
+        extern crate test;
+
+        #[macro_use] extern crate proptest;
+
+        mod test_generators;
+    }
+}
 
 extern crate phf;
 
@@ -23,18 +29,19 @@ extern crate unreachable;
 
 extern crate itertools;
 
+extern crate arraydeque;
+
 pub mod tokens;
 
 pub mod lexer;
 pub mod lexer_deabbr;
-pub mod show;
+pub mod lexer_abbr;
 
 pub mod str_strategy;
 
 pub mod expr;
 
-//pub mod expr_allocator;
-
 pub mod parser;
+mod unparser;
 
 mod util;

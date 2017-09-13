@@ -76,12 +76,8 @@ pub type LexerResult<'a> = Result<StrToken<'a>, Error>;
 // Public API, Lexer type:
 //============================================================================//
 
-/// A [`Token`], with `&'a str` as the backing type for strings.
-///
-/// [`Token`]: struct.Token.html
-pub(crate) type StrToken<'a> = Token<In<'a>>;
-
 /// The lexer of xpath expressions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lexer<'a> {
     remains: In<'a>,
     prefer_op_names: bool,
@@ -92,12 +88,15 @@ pub struct Lexer<'a> {
 //============================================================================//
 
 impl<'a> Lexer<'a> {
+    /// Constructs a new lexer for the given input string slice,
+    /// and the mode for prefering operator names or not.
+    pub(crate) fn new_pref(remains: In, prefer_op_names: bool) -> Lexer {
+        Lexer { remains, prefer_op_names }
+    }
+
     /// Constructs a new lexer for the given input string slice.
     pub fn new(src: In) -> Lexer {
-        Lexer {
-            remains: src,
-            prefer_op_names: false,
-        }
+        Lexer::new_pref(src, false)
     }
 
     /// Yields true if nothing remains to be lexed.
@@ -184,7 +183,7 @@ macro_rules! lexer {
 //============================================================================//
 
 /// A map of all single character tokens.
-static SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
+const SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     "/" => Slash,
     "(" => LeftParen,
     ")" => RightParen,
@@ -201,7 +200,7 @@ static SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
 };
 
 // A map of all two character tokens.
-static TWO_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
+const TWO_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
     "<=" => LessThanOrEqual,
     ">=" => GreaterThanOrEqual,
     "!=" => NotEqual,
@@ -351,9 +350,9 @@ NCName         ::= NameStartChar (NameChar)*
 
 pub(crate) fn is_name_char_start(c: char) -> bool {
     match c {
+        'a'...'z' |
         'A'...'Z' |
         '_'...'_' |
-        'a'...'z' |
         '\u{C0}'...'\u{D6}' |
         '\u{D8}'...'\u{F6}' |
         '\u{F8}'...'\u{2FF}' |
@@ -382,6 +381,7 @@ pub(crate) fn is_name_char(c: char) -> bool {
     }
 }
 
+/// A lexer matching a `NameStartChar`.
 fn name_char_start<'a>(i: In<'a>) -> IResult<In<'a>, In<'a>> {
     map_opt!(i, take!(1), |s: In<'a>| {
         s.chars()
@@ -430,7 +430,7 @@ lexer!(
     map!(
         terminated!(
             lerr!(ExpectedQName, lex_qname),
-            lerr!(ExpectedLeftParenthesis, complete!(peek!(tag!("("))))
+            lerr!(ExpectedLeftParenthesis, complete!(tag!("(")))
         ),
         FnName
     )
@@ -488,9 +488,7 @@ impl<'a> Lexer<'a> {
         match lexer_tok(self.remains, self.prefer_op_names) {
             Done(rem, tok) => {
                 self.remains = rem;
-                // See http://www.w3.org/TR/xpath/#exprlex
-                self.prefer_op_names =
-                    !(tok.precedes_node_test() || tok.precedes_expression() || tok.is_operator());
+                self.prefer_op_names = tok.prefer_op_names();
                 Ok(tok)
             }
             Error(ErrorKind::Custom(MismatchedQuoteCharacters)) => Err(MismatchedQuoteCharacters),
@@ -519,20 +517,20 @@ mod tests {
     }
 
     /// Lexes the input completely into a vector.
-    fn all_tokens_raw(i: In) -> Result<VTok, Error> {
-        Lexer::new(i).collect()
+    fn all_tokens_raw(i: In, pon: bool) -> Result<VTok, Error> {
+        Lexer::new_pref(i, pon).collect()
     }
 
     /// Lexes the input completely and ensures the lexer did not error.
-    fn all_tokens(i: In) -> VTok {
-        all_tokens_raw(i).unwrap_or_else(|e| no_complete(e))
+    fn all_tokens(i: In, pon: bool) -> VTok {
+        all_tokens_raw(i, pon).unwrap_or_else(|e| no_complete(e))
     }
 
     /// Macro for writing lexer tests.
     macro_rules! tests {
         (($name: ident, $inp: expr) => $res: expr) => {
             #[test]
-            fn $name() { assert_eq!(all_tokens($inp), {$res}); }
+            fn $name() { assert_eq!(all_tokens($inp, false), {$res}); }
         };
         (($name: ident, $inp: expr) => $res: expr, $($args:tt)*) => {
             tests!(($name, $inp) => $res);
@@ -542,7 +540,7 @@ mod tests {
 
     macro_rules! exceptionals {
         (($name: ident, $inp: expr) => $err: expr) => {
-            #[test] fn $name() { assert_eq!(all_tokens_raw($inp), Err($err)); }
+            #[test] fn $name() { assert_eq!(all_tokens_raw($inp, false), Err($err)); }
         };
         (($name: ident, $inp: expr) => $err: expr, $($args:tt)*) => {
             exceptionals!(($name, $inp) => $err);
@@ -679,7 +677,11 @@ mod tests {
         use super::*;
 
         fn fun<'a>(ns: OIn<'a>, lp: In<'a>, args: VTok<'a>) -> VTok<'a> {
-            pars(FnName(QName::new(ns, lp)), args)
+            let mut vec = Vec::with_capacity(args.len() + 2);
+            vec.push(FnName(QName::new(ns, lp)));
+            vec.extend(args);
+            vec.push(Const(RightParen));
+            vec
         }
 
         tests! {
@@ -780,6 +782,27 @@ mod tests {
                 => UnableToCreateToken,
             (when_quote_characters_mismatched, "'hello\"")
                 => MismatchedQuoteCharacters
+        }
+    }
+
+    /// Tests with property based testing... using proptest (like quickcheck).
+    mod proptest {
+        use super::*;
+        use test_generators::*;
+
+        proptest! {
+            #[test]
+            fn token_lex_identity(ref orig in gen_token()) {
+                let t = orig.borrowed();
+                let disp = format!("{}", t);
+                prop_assert_eq!(vec![t],
+                    all_tokens(disp.as_ref(), !t.prefer_op_names()));
+            }
+
+            #[test]
+            fn lexer_never_panic(ref s in "\\PC*") {
+                let _ = all_tokens_raw(s.as_ref(), true);
+            }
         }
     }
 }

@@ -2,13 +2,13 @@
 // Imports:
 //============================================================================//
 
-use super::lexer::*;
-
 use super::tokens::*;
 use super::tokens::CToken::*;
 use super::tokens::AxisName::*;
 use super::tokens::NodeType::*;
 use super::tokens::Token::*;
+
+use self::ExpansionState::*;
 
 //============================================================================//
 // Public API, Types:
@@ -16,6 +16,7 @@ use super::tokens::Token::*;
 
 /// `LexerDeabbreviator` deabbreviates the token stream from the lexer,
 /// producing a smaller token language for the parser to deal with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LexerDeabbreviator<I> {
     /// The source token stream.
     source: I,
@@ -30,75 +31,97 @@ pub struct LexerDeabbreviator<I> {
 impl<I> LexerDeabbreviator<I> {
     /// Constructs a new deabbreviator.
     pub fn new(source: I) -> LexerDeabbreviator<I> {
-        LexerDeabbreviator {
+        Self {
             source: source,
-            state: ExpansionState::NE,
+            state:  ExpansionState::NE,
         }
     }
 }
 
-macro_rules! transition {
-    ($self: expr, $s: expr, $r: expr) => {
-        { $self.state = $s; Some(Ok($r))
-        }
-    }
-}
-
-impl<'a, I> Iterator for LexerDeabbreviator<I>
+impl<'a, E, I> Iterator for LexerDeabbreviator<I>
 where
-    I: Iterator<Item = LexerResult<'a>>,
+    I: Iterator<Item = Result<StrToken<'a>, E>>,
 {
-    type Item = LexerResult<'a>;
+    type Item = Result<StrToken<'a>, E>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use self::ExpansionState::*;
-        match self.state {
-            // No expansion state:
-            NE => self.source.next().map(|x| x.map(|tok| self.expand(tok))),
-            // NA expansion FSM:
-            NA => transition!(self, NE, NType(Node)),
-            // DA expansion FSM:
-            DA => transition!(self, DB, Axis(DescendantOrSelf)),
-            DB => transition!(self, DC, NType(Node)),
-            DC => transition!(self, NE, Const(Slash)),
-        }
+        self.state.yield_expanded().map(Ok).or_else(|| {
+            self.source
+                .next()
+                .map(|x| x.map(|tok| self.state.start_expand(tok)))
+        })
     }
 }
 
 //============================================================================//
-// Deabbriviator, Internal FSM:
+// ExpansionState, Internal FSM:
 //============================================================================//
 
 /// Tracks the state when deabbreviating.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum ExpansionState {
     // Finite State Machine(s):
-    /// Transitions: DA => DB => DC => NE
+    /// Transitions: DA => DB => DC => DD => DE => NE
     DA,
     DB,
     DC,
+    DD,
+    DE,
     /// Transitions: NA => NE
     NA,
+    NB,
+    NC,
     /// Not expanding
     NE,
 }
 
-macro_rules! expand {
-    ($self: expr, $next: expr, $yield: expr) => {
-        { $self.state = $next; $yield }
+impl ExpansionState {
+    /// Attempt to yield the next token from the current `ExpansionState`
+    /// and advance the state to the next stage.
+    fn yield_expanded<'a>(&mut self) -> Option<Token<&'a str>> {
+        match *self {
+            // No expansion state:
+            NE => None,
+            // NA expansion FSM:
+            NA => self.transition_some(NB, NType(Node)),
+            NB => self.transition_some(NC, Const(LeftParen)),
+            NC => self.transition_some(NE, Const(RightParen)),
+            // DA expansion FSM:
+            DA => self.transition_some(DB, Axis(DescendantOrSelf)),
+            DB => self.transition_some(DC, NType(Node)),
+            DC => self.transition_some(DD, Const(LeftParen)),
+            DD => self.transition_some(DE, Const(RightParen)),
+            DE => self.transition_some(NE, Const(Slash)),
+        }
     }
-}
 
-impl<I> LexerDeabbreviator<I> {
-    fn expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
-        use self::ExpansionState::*;
+    /// Start expanding if the given token warrants it and yield the first
+    /// replacement token in the expansion chain.
+    fn start_expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
         match tok {
-            Const(DoubleSlash) => expand!(self, DA, Const(Slash)),
-            Const(CurrentNode) => expand!(self, NA, Axis(SelfAxis)),
-            Const(ParentNode) => expand!(self, NA, Axis(Parent)),
+            Const(DoubleSlash) => self.transition(DA, Const(Slash)),
+            Const(CurrentNode) => self.transition(NA, Axis(SelfAxis)),
+            Const(ParentNode) => self.transition(NA, Axis(Parent)),
             Const(AtSign) => Axis(Attribute),
             other => other,
         }
+    }
+
+    fn transition_some<'a>(
+        &mut self,
+        nstate: Self,
+        ret: Token<&'a str>,
+    ) -> Option<Token<&'a str>> {
+        Some(self.transition(nstate, ret))
+    }
+
+    fn transition<'a>(
+        &mut self,
+        nstate: Self,
+        ret: Token<&'a str>,
+    ) -> Token<&'a str> {
+        *self = nstate;
+        ret
     }
 }
 
@@ -107,11 +130,11 @@ impl<I> LexerDeabbreviator<I> {
 //============================================================================//
 
 #[cfg(test)]
-mod tests {    
+mod tests {
     use test;
 
     use super::*;
-    use lexer::Error;
+    use lexer::{Error, Lexer, LexerResult};
 
     // helpers & macros:
 
@@ -149,12 +172,15 @@ mod tests {
 
         (double_slash_to_descendant_or_self, vec![Ok(Const(DoubleSlash))])
             => vec![Const(Slash), Axis(DescendantOrSelf),
-                    NType(Node), Const(Slash)],
+                    NType(Node), Const(LeftParen), Const(RightParen),
+                    Const(Slash)],
 
         (current_node_to_self_node, vec![Ok(Const(CurrentNode))])
-            => vec![Axis(SelfAxis), NType(Node)],
+            => vec![Axis(SelfAxis),
+                    NType(Node), Const(LeftParen), Const(RightParen)],
 
         (parent_node_to_parent_node, vec![Ok(Const(ParentNode))])
-            => vec![Axis(Parent), NType(Node)]
+            => vec![Axis(Parent),
+                    NType(Node), Const(LeftParen), Const(RightParen)]
     }
 }
