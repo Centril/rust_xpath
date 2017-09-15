@@ -109,8 +109,8 @@ pub fn from_char_ranges<'a>(preferred: CharRanges<'a>, ranges: CharRanges<'a>
 
 macro_rules! prop_compose_enum {
     ($gen: ident -> $rtype: ty [$($item:expr),+ $(,)*]) => {
-        pub fn $gen() -> BoxedStrategy<$rtype> {
-            prop_oneof!($(Just($item)),*).boxed()
+        pub fn $gen() -> Union<Just<$rtype>> {
+            Union::new(vec![$(Just($item)),*])
         }
     }
 }
