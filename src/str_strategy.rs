@@ -68,7 +68,7 @@ where
     Store: Eq + Hash,
 {
     /// Provides an immutable view of the backing `HashSet` storage.
-    fn store(& self) -> &HashSet<Store>;
+    fn store(&self) -> &HashSet<Store>;
 }
 
 macro_rules! caching_strategy {
@@ -127,23 +127,25 @@ pub struct HoldingRefStrategy(HRSInside);
 impl<'a> StrStrategy<'a> for HoldingRefStrategy {
     type Output = HoldingRef;
 
-    /// Allocates the given input in the cache and yields a HoldingRef to it.
+    /// Allocates the given input in the cache and yields a HoldingRef to
+    /// it.
     fn inject_str(&self, input: &'a str) -> Self::Output {
-        /*
-         * This is safe because nothing is ever removed from the HashSet,
+        /* This is safe because nothing is ever removed from the HashSet,
          * and when it grows (length == capacity), Box<str> may be moved,
          * but the heap allocated contents are never deallocated,
-         * thus the HoldingRef returned always points to a valid memory location.
+         * thus the HoldingRef returned always points to a valid memory
+         * location.
          * Therefore, this will never cause memory unsafety.
-         *
-         * In addition, UnsafeCell causes HashSetStrategy to be !Sync, which
+         * */
+
+        /* In addition, UnsafeCell causes HashSetStrategy to be !Sync, which
          * makes unsynchronized mutation impossible. Were this not the case,
          * a data race could occur when reallocation of the HashSet occurs.
-         */
+         * */
         let out = cs_get_or_insert!(self, input);
         HoldingRef {
-            parent: self.0.clone(),
-            item: out.as_ref(),
+            parent: Rc::clone(&self.0),
+            item:   out.as_ref(),
         }
     }
 }
@@ -154,29 +156,22 @@ caching_strategy!(HoldingRefStrategy, Box<str>);
 ///
 /// [`HoldingRef`]: struct.HoldingRefStrategy.html
 pub struct HoldingRef {
-    #[allow(dead_code)]
-    parent: HRSInside, // Only used as a drop guard.
+    #[allow(dead_code)] parent: HRSInside, // Only used as a drop guard.
     item: *const str,
 }
 
 impl Deref for HoldingRef {
     type Target = str;
 
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.item }
-    }
+    fn deref(&self) -> &Self::Target { unsafe { &*self.item } }
 }
 
 impl AsRef<str> for HoldingRef {
-    fn as_ref(&self) -> &str {
-        self
-    }
+    fn as_ref(&self) -> &str { self }
 }
 
 impl Borrow<str> for HoldingRef {
-    fn borrow(&self) -> &str {
-        self
-    }
+    fn borrow(&self) -> &str { self }
 }
 
 //============================================================================//
@@ -202,11 +197,10 @@ impl<'a> StrStrategy<'a> for ArcStrategy {
 
     /// Allocates the given input in the cache and yields a cloned Arc<str>.
     fn inject_str(&self, input: &'a str) -> Self::Output {
-        /*
-         * This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
+        /* This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
          * which makes unsynchronized mutation impossible.
-         */
-        cs_get_or_insert!(self, input).clone()
+         * */
+        Arc::clone(cs_get_or_insert!(self, input))
     }
 }
 
@@ -232,11 +226,10 @@ impl<'a> StrStrategy<'a> for RcStrategy {
 
     /// Allocates the given input in the cache and yields a cloned Rc<str>.
     fn inject_str(&self, input: &'a str) -> Self::Output {
-        /*
-         * This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
+        /* This is safe since UnsafeCell causes HashSetStrategy to be !Sync,
          * which makes unsynchronized mutation impossible.
-         */
-         cs_get_or_insert!(self, input).clone()
+         * */
+        Rc::clone(cs_get_or_insert!(self, input))
     }
 }
 
@@ -256,9 +249,7 @@ impl<'a> StrStrategy<'a> for BoxStrategy {
     type Output = Box<str>;
 
     /// Allocates the input on the heap and just returns that box.
-    fn inject_str(&self, input: &'a str) -> Self::Output {
-        input.into()
-    }
+    fn inject_str(&self, input: &'a str) -> Self::Output { input.into() }
 }
 
 //============================================================================//
@@ -271,7 +262,8 @@ impl<'a> StrStrategy<'a> for BoxStrategy {
 ///
 /// [`StrStrategy`]: trait.StrStrategy.html
 /// [`BoxStrategy`]: struct.BoxStrategy.html
-/// [`String`]: https://doc.rust-lang.org/nightly/collections/string/struct.String.html
+/// [`String`]:
+/// https://doc.rust-lang.org/nightly/collections/string/struct.String.html
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
 pub struct StringStrategy;
 
@@ -279,10 +271,10 @@ impl<'a> StrStrategy<'a> for StringStrategy {
     type Output = String;
 
     /// Allocates the input on the heap as a [`String`] and just returns it.
-    /// [`String`]: https://doc.rust-lang.org/nightly/collections/string/struct.String.html
-    fn inject_str(&self, input: &'a str) -> Self::Output {
-        input.into()
-    }
+    /// [`String`]:
+    /// https://doc.rust-lang.org/nightly/collections/string/struct.String.
+    /// html
+    fn inject_str(&self, input: &'a str) -> Self::Output { input.into() }
 }
 
 //============================================================================//
@@ -302,9 +294,7 @@ impl<'a> StrStrategy<'a> for RefStrategy {
     type Output = &'a str;
 
     /// Returns the given input back.
-    fn inject_str(&self, input: &'a str) -> Self::Output {
-        input
-    }
+    fn inject_str(&self, input: &'a str) -> Self::Output { input }
 }
 
 //============================================================================//
