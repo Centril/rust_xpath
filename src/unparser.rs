@@ -2,8 +2,11 @@
 // Imports:
 //============================================================================//
 
+use itertools::Itertools;
+
 use super::expr;
 use super::expr::*;
+use super::tokens;
 use super::tokens::*;
 use super::tokens::Token::*;
 
@@ -75,6 +78,96 @@ trait PushToken {
     fn push(&mut self, token: Token<&str>);
 }
 
+impl expr::Axis {
+    fn walk<P: PushToken>(&self, pt: &mut P) {
+        use expr::Axis::*;
+        let axis = match *self {
+            Child => AxisName::Child,
+            SelfAxis => AxisName::SelfAxis,
+            Parent => AxisName::Parent,
+            Descendant => AxisName::Descendant,
+            DescendantOrSelf => AxisName::DescendantOrSelf,
+            Attribute => AxisName::Attribute,
+            Namespace => AxisName::Namespace,
+            Ancestor => AxisName::Ancestor,
+            AncestorOrSelf => AxisName::AncestorOrSelf,
+            PrecedingSibling => AxisName::PrecedingSibling,
+            FollowingSibling => AxisName::FollowingSibling,
+            Preceding => AxisName::Preceding,
+            Following => AxisName::Following,
+        };
+        pt.push(Axis(axis));
+    }
+}
+
+impl expr::LiteralValue {
+    fn walk<P: PushToken>(&self, pt: &mut P) {
+        pt.push(match *self {
+            LiteralValue::Number(n) => Token::Number(n),
+            LiteralValue::String(ref s) => Token::Literal(s),
+        });
+    }
+}
+
+impl expr::NameTest {
+    fn walk<P: PushToken>(&self, pt: &mut P) {
+        let nt = self.borrowed();
+        let ntt = tokens::NameTest::new(nt.prefix, nt.local);
+        pt.push(Token::NTest(ntt));
+    }
+}
+
+impl expr::NodeTest {
+    fn walk<P: PushToken>(&self, pt: &mut P) {
+        use expr::NodeTest::*;
+        match *self {
+            Node => {
+                pt.push(Token::NType(NodeType::Node));
+                pt.push(Const(CToken::LeftParen));
+                pt.push(Const(CToken::RightParen));
+            },
+            Text => {
+                pt.push(Token::NType(NodeType::Text));
+                pt.push(Const(CToken::LeftParen));
+                pt.push(Const(CToken::RightParen));
+            },
+            Comment => {
+                pt.push(Token::NType(NodeType::Comment));
+                pt.push(Const(CToken::LeftParen));
+                pt.push(Const(CToken::RightParen));
+            },
+            ProcIns(ref opi) => {
+                pt.push(Token::NType(NodeType::ProcIns));
+                pt.push(Const(CToken::LeftParen));
+                if let Some(lit) = opi.as_ref() {
+                    pt.push(Token::Literal(&lit));
+                }
+                pt.push(Const(CToken::RightParen));
+            },
+            Attribute(ref nt) => nt.walk(pt),
+            Namespace(ref nt) => nt.walk(pt),
+            Element(ref nt) => nt.walk(pt),
+        }
+    }
+}
+
+impl expr::StepsB {
+    fn walk<P: PushToken>(&self, pt: &mut P) {
+        // axis:
+        self.axis.walk(pt);
+
+        // nodetest:
+        self.node_test.walk(pt);
+
+        // predicates:
+        self.predicates.iter().foreach(|pred| {
+            pt.push(Const(CToken::LeftBracket));
+            pred.walk(pt, 1);
+            pt.push(Const(CToken::RightBracket));
+        });
+    }
+}
+
 impl ExprB {
     fn walk<P: PushToken>(&self, pt: &mut P, pprec: u8) {
         use self::ExprB::*;
@@ -101,21 +194,47 @@ impl ExprB {
                 Rem => lassoc(pt, lhs, rhs, pprec, 6, CToken::Remainder),
 
                 Union => lassoc(pt, lhs, rhs, pprec, 8, CToken::Pipe),
-                Filter => unimplemented!(),
+                Filter => {
+                    lhs.walk(pt, 9);
+                    pt.push(Const(CToken::LeftBracket));
+                    rhs.walk(pt, 1);
+                    pt.push(Const(CToken::RightBracket));
+                },
             },
             Neg(ref expr) => pars_if(pt, pprec, 7, |pt| {
                 pt.push(Const(CToken::MinusSign));
                 expr.walk(pt, 7)
             }),
-            /*
-            Var(ref qn) => unimplemented!(),
-            Apply(ref qn, ref args) => unimplemented!(),
-            Path(ref start, ref steps) => unimplemented!(),
-            Literal(ref lit) => unimplemented!(),
-            ContextNode => unimplemented!(),
-            RootNode => unimplemented!(),
-            */
-            _ => unimplemented!()
+            Var(ref qn) => {
+                let qnb = qn.borrowed();
+                let qnt = tokens::QName::new(qnb.prefix, qnb.local);
+                pt.push(VarRef(qnt));
+            },
+            Apply(ref qn, ref args) => {
+                let qnb = qn.borrowed();
+                let qnt = tokens::QName::new(qnb.prefix, qnb.local);
+                pt.push(FnName(qnt));
+                for arg in args.iter() {
+                    arg.walk(pt, 1);
+                }
+                pt.push(Const(CToken::RightParen));
+            },
+            Path(ref start, ref steps) => {
+                start.walk(pt, 9);
+                let mut iter = steps.iter();
+
+                iter.next()
+                    .expect("Malformed path, must have >= 1 step")
+                    .walk(pt);
+
+                while let Some(step) = iter.next() {
+                    pt.push(Const(CToken::Slash));
+                    step.walk(pt);
+                }
+            },
+            Literal(ref lit) => lit.walk(pt),
+            ContextNode => {},
+            RootNode => pt.push(Const(CToken::Slash)),
         }
     }
 }
