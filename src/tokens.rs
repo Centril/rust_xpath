@@ -5,6 +5,7 @@
 use std::fmt::{Display, Formatter, Result};
 
 use super::util::to_boxed_str;
+
 use self::Token::*;
 use self::CToken::*;
 use self::AxisName::*;
@@ -354,8 +355,7 @@ impl<S: AsRef<str>> QName<S> {
 impl<S: AsRef<str>> Token<S> {
     /// Applies a pure function mapping the string type of the Token.
     /// This is a covariant endofunctor in the sense that the category
-    /// mapped
-    /// over is one with objects : AsRef<str>.
+    /// mapped over is one with objects : AsRef<str>.
     pub fn map<'a, F, T>(&'a self, f: F) -> Token<T>
     where
         T: AsRef<str>,
