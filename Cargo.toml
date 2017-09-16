@@ -16,6 +16,7 @@ phf_macros  = "0.7.21"
 quick-error = "1.2.0"
 unreachable = "1.0.0"
 itertools   = "0.6.2"
+arrayvec    = "0.4.1"
 arraydeque  = "0.2.3"
 
 cfg-if = "0.1.2"
