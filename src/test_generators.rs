@@ -132,7 +132,15 @@ macro_rules! prop_compose_enum {
 // Tokens:
 //============================================================================//
 
-/// A strategy for `Token`:s.
+prop_compose! {
+    /// Strategy for `Token`s:
+    [pub] fn gen_tokens()(vec in prop::collection::vec(gen_token(), 0..100))
+                       -> Vec<Token<Box<str>>> {
+        vec
+    }
+}
+
+/// Strategy for a `Token`.
 pub fn gen_token() -> BoxedStrategy<Token<Box<str>>> {
     prop_oneof![
       gen_ctoken().prop_map(Const)
