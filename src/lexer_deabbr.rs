@@ -33,16 +33,16 @@ impl<I> LexerDeabbreviator<I> {
     pub fn new(source: I) -> LexerDeabbreviator<I> {
         Self {
             source: source,
-            state:  ExpansionState::NE,
+            state:  NE,
         }
     }
 }
 
-impl<'a, E, I> Iterator for LexerDeabbreviator<I>
+impl<S: AsRef<str>, E, I> Iterator for LexerDeabbreviator<I>
 where
-    I: Iterator<Item = Result<StrToken<'a>, E>>,
+    I: Iterator<Item = Result<Token<S>, E>>,
 {
-    type Item = Result<StrToken<'a>, E>;
+    type Item = Result<Token<S>, E>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.state.yield_expanded().map(Ok).or_else(|| {
@@ -78,50 +78,39 @@ enum ExpansionState {
 impl ExpansionState {
     /// Attempt to yield the next token from the current `ExpansionState`
     /// and advance the state to the next stage.
-    fn yield_expanded<'a>(&mut self) -> Option<Token<&'a str>> {
+    fn yield_expanded<S: AsRef<str>>(&mut self) -> Option<Token<S>> {
+        macro_rules! transition { ($newstate: expr, $ret: expr) => {{
+            *self = $newstate; Some($ret)
+        }}; }
         match *self {
             // No expansion state:
             NE => None,
             // NA expansion FSM:
-            NA => self.transition_some(NB, NType(Node)),
-            NB => self.transition_some(NC, Const(LeftParen)),
-            NC => self.transition_some(NE, Const(RightParen)),
+            NA => transition!(NB, NType(Node)),
+            NB => transition!(NC, Const(LeftParen)),
+            NC => transition!(NE, Const(RightParen)),
             // DA expansion FSM:
-            DA => self.transition_some(DB, Axis(DescendantOrSelf)),
-            DB => self.transition_some(DC, NType(Node)),
-            DC => self.transition_some(DD, Const(LeftParen)),
-            DD => self.transition_some(DE, Const(RightParen)),
-            DE => self.transition_some(NE, Const(Slash)),
+            DA => transition!(DB, Axis(DescendantOrSelf)),
+            DB => transition!(DC, NType(Node)),
+            DC => transition!(DD, Const(LeftParen)),
+            DD => transition!(DE, Const(RightParen)),
+            DE => transition!(NE, Const(Slash)),
         }
     }
 
     /// Start expanding if the given token warrants it and yield the first
     /// replacement token in the expansion chain.
-    fn start_expand<'a>(&mut self, tok: Token<&'a str>) -> Token<&'a str> {
+    fn start_expand<S: AsRef<str>>(&mut self, tok: Token<S>) -> Token<S> {
+        macro_rules! transition { ($newstate: expr, $ret: expr) => {{
+            *self = $newstate; $ret
+        }}; }
         match tok {
-            Const(DoubleSlash) => self.transition(DA, Const(Slash)),
-            Const(CurrentNode) => self.transition(NA, Axis(SelfAxis)),
-            Const(ParentNode) => self.transition(NA, Axis(Parent)),
+            Const(DoubleSlash) => transition!(DA, Const(Slash)),
+            Const(CurrentNode) => transition!(NA, Axis(SelfAxis)),
+            Const(ParentNode) => transition!(NA, Axis(Parent)),
             Const(AtSign) => Axis(Attribute),
             other => other,
         }
-    }
-
-    fn transition_some<'a>(
-        &mut self,
-        nstate: Self,
-        ret: Token<&'a str>,
-    ) -> Option<Token<&'a str>> {
-        Some(self.transition(nstate, ret))
-    }
-
-    fn transition<'a>(
-        &mut self,
-        nstate: Self,
-        ret: Token<&'a str>,
-    ) -> Token<&'a str> {
-        *self = nstate;
-        ret
     }
 }
 
