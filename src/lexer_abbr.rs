@@ -256,11 +256,10 @@ impl IntoIterator for ContractionState {
 
 #[cfg(test)]
 mod tests {
-    use test;
     use std::mem::drop;
     use itertools::Itertools;
-    use super::*;
 
+    use super::*;
     use lexer_deabbr::LexerDeabbreviator;
 
     mod prop_test {
