@@ -469,9 +469,6 @@ pub enum LiteralValue<L = B>
 where
     L: AsRef<str>,
 {
-    /// A literal boolean.
-    Boolean(bool),
-
     /// A literal number.
     Number(f64),
 
@@ -530,7 +527,6 @@ impl<L: AsRef<str>> LiteralValue<L> {
     {
         use self::LiteralValue::*;
         match *self {
-            Boolean(b) => Boolean(b),
             Number(n) => Number(n),
             String(ref s) => String(f(s)),
         }
