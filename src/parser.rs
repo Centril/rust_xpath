@@ -125,6 +125,7 @@ where
     fn parse(&self, input: &'input str) -> ParseResult<Self::Expr> {
         let tokens = Lexer::new(input);
         let deabbr = LexerDeabbreviator::new(tokens);
+        println!("deabbr = {:?}", deabbr.clone().collect::<Vec<_>>());
         self.parse_iter(deabbr)
     }
 }
@@ -173,8 +174,8 @@ where
 //============================================================================//
 
 /// Provides allocation mechanisms for the Parser.
-/// The parser itself never directly allocates and insteads the allocator
-/// to perform any needed allocation.
+/// The parser itself never directly allocates and instead the allocator
+/// performs any needed allocation.
 ///
 /// Through this mechanism, a variety of methods can be used for allocation,
 /// including simply using `Box`, stack allocation, `typed_arena`.
@@ -358,7 +359,7 @@ new_bin_op!(new_mul, BinaryOp::Mul);
 new_bin_op!(new_div, BinaryOp::Div);
 new_bin_op!(new_rem, BinaryOp::Rem);
 new_bin_op!(new_union, BinaryOp::Union);
-new_bin_op!(new_filter, BinaryOp::Union);
+new_bin_op!(new_filter, BinaryOp::Filter);
 
 //============================================================================//
 // Internal: Conversions:
@@ -976,7 +977,23 @@ mod test {
     #[test]
     fn stuff() {
         let parser = Parser::new(BSM::default());
+        println!("{:?}", parser.parse("1|2[3]").unwrap());
+
+        println!();
+        println!("{:?}", parser.parse("div[1]").unwrap());
+
+        println!();
+        println!("{:?}", parser.parse("1[2][3]").unwrap());
+        println!("{:?}", parser.parse("(1[2])[3]").unwrap());
+        println!("{:?}", parser.parse("1[(2[3])]").unwrap());
+
+        println!();
+        println!("{:?}", parser.parse(".").unwrap());
+        println!("{:?}", parser.parse("self::node()").unwrap());
+
+        println!();
         println!("{:?}", parser.parse("//.").unwrap());
+        println!("{:?}", parser.parse("/descendant-or-self::node()/self::node()").unwrap());
         /*
         println!("{:?}", parser.parse("-1|2").unwrap());
         println!("{:?}", parser.parse("-(1 or 2)").unwrap());
@@ -984,6 +1001,5 @@ mod test {
         println!("{:?}", parser.parse("1 and 2 and 3").unwrap());
         println!("{:?}", parser.parse("1 and (2 and 3)").unwrap());
         println!("{:?}", parser.parse("(1 or 2) and 3").unwrap());
-        */
-    }
+*/    }
 }
