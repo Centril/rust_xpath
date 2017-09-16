@@ -785,7 +785,7 @@ mod tests {
         }
     }
 
-    /// Tests with property based testing... using proptest (like quickcheck).
+    /// Tests with property based testing... using proptest:
     mod proptest {
         use super::*;
         use test_generators::*;
@@ -800,8 +800,9 @@ mod tests {
             }
 
             #[test]
-            fn lexer_never_panic(ref s in "\\PC*") {
+            fn never_panic(ref s in "\\PC*") {
                 let _ = all_tokens_raw(s.as_ref(), true);
+                let _ = all_tokens_raw(s.as_ref(), false);
             }
         }
     }

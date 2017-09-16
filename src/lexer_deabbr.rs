@@ -17,7 +17,11 @@ use self::ExpansionState::*;
 /// `LexerDeabbreviator` deabbreviates the token stream from the lexer,
 /// producing a smaller token language for the parser to deal with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LexerDeabbreviator<I> {
+pub struct LexerDeabbreviator<S, E, I>
+where
+    S: AsRef<str>,
+    I: Iterator<Item = Result<Token<S>, E>>,
+{
     /// The source token stream.
     source: I,
     /// Current expansion state.
@@ -28,9 +32,13 @@ pub struct LexerDeabbreviator<I> {
 // Public API, Implementation:
 //============================================================================//
 
-impl<I> LexerDeabbreviator<I> {
+impl<S, E, I> LexerDeabbreviator<S, E, I>
+where
+    S: AsRef<str>,
+    I: Iterator<Item = Result<Token<S>, E>>,
+{
     /// Constructs a new deabbreviator.
-    pub fn new(source: I) -> LexerDeabbreviator<I> {
+    pub fn new(source: I) -> LexerDeabbreviator<S, E, I> {
         Self {
             source: source,
             state:  NE,
@@ -38,8 +46,9 @@ impl<I> LexerDeabbreviator<I> {
     }
 }
 
-impl<S: AsRef<str>, E, I> Iterator for LexerDeabbreviator<I>
+impl<S, E, I> Iterator for LexerDeabbreviator<S, E, I>
 where
+    S: AsRef<str>,
     I: Iterator<Item = Result<Token<S>, E>>,
 {
     type Item = Result<Token<S>, E>;
@@ -122,15 +131,20 @@ impl ExpansionState {
 mod tests {
     use test;
 
+    use std::mem::drop;
+
+    use itertools::Itertools;
+
+    use lexer::{Lexer, LexerResult};
+
     use super::*;
-    use lexer::{Error, Lexer, LexerResult};
 
     // helpers & macros:
 
-    fn all_tokens(i: Vec<LexerResult>) -> Vec<Token<&str>> {
-        LexerDeabbreviator::new(i.into_iter())
-            .collect::<Result<Vec<_>, Error>>()
-            .unwrap()
+    fn all_tokens<'a>(
+        i: Vec<Result<StrToken<'a>, ()>>,
+    ) -> Result<Vec<StrToken<'a>>, ()> {
+        LexerDeabbreviator::new(i.into_iter()).collect()
     }
 
     macro_rules! tests {
@@ -154,22 +168,45 @@ mod tests {
         b.iter(|| LexerDeabbreviator::new(l.clone().into_iter()).count());
     }
 
-    // actual tests:
-    tests! {
-        (at_sign_to_attribute_axis, vec![Ok(Const(AtSign))])
-            => vec![Axis(Attribute)],
+    mod unit {
+        use super::*;
 
-        (double_slash_to_descendant_or_self, vec![Ok(Const(DoubleSlash))])
-            => vec![Const(Slash), Axis(DescendantOrSelf),
-                    NType(Node), Const(LeftParen), Const(RightParen),
-                    Const(Slash)],
+        tests! {
+            (err_to_err, vec![Err(())])
+                => Err(()),
 
-        (current_node_to_self_node, vec![Ok(Const(CurrentNode))])
-            => vec![Axis(SelfAxis),
-                    NType(Node), Const(LeftParen), Const(RightParen)],
+            (at_sign_to_attribute_axis, vec![Ok(Const(AtSign))])
+                => Ok(vec![Axis(Attribute)]),
 
-        (parent_node_to_parent_node, vec![Ok(Const(ParentNode))])
-            => vec![Axis(Parent),
-                    NType(Node), Const(LeftParen), Const(RightParen)]
+            (double_slash_to_descendant_or_self, vec![Ok(Const(DoubleSlash))])
+                => Ok(vec![
+                        Const(Slash), Axis(DescendantOrSelf),
+                        NType(Node), Const(LeftParen), Const(RightParen),
+                        Const(Slash)]),
+
+            (current_node_to_self_node, vec![Ok(Const(CurrentNode))])
+                => Ok(vec![
+                        Axis(SelfAxis),
+                        NType(Node), Const(LeftParen), Const(RightParen)]),
+
+            (parent_node_to_parent_node, vec![Ok(Const(ParentNode))])
+                => Ok(vec![
+                        Axis(Parent),
+                        NType(Node), Const(LeftParen), Const(RightParen)])
+        }
+    }
+
+    /// Tests with property based testing... using proptest:
+    mod proptest {
+        use super::*;
+        use test_generators::*;
+
+        proptest! {
+            #[test]
+            fn never_panic(ref orig in gen_tokens()) {
+                orig.into_iter().map(|t| t.borrowed()).map(Ok)
+                    .foreach(|s: Result<StrToken, ()>| drop(s));
+            }
+        }
     }
 }
