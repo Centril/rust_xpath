@@ -326,8 +326,10 @@ lexer!(
     ExpectedNodeTest,
     map!(
         alt_complete!(
-            vtag!(Text, "text") | vtag!(Node, "node") | vtag!(Comment, "comment") |
-                vtag!(ProcIns, "processing-instruction")
+            vtag!(Text, "text()") |
+            vtag!(Node, "node()") |
+            vtag!(Comment, "comment()") |
+            vtag!(ProcIns, "processing-instruction")
         ),
         NType
     )
@@ -698,18 +700,16 @@ mod tests {
     mod node_type {
         use super::*;
 
-        fn nt<'a>(nt: NodeType, args: VTok<'a>) -> VTok<'a> {
-            pars(NType(nt), args)
-        }
+        fn nt<'a>(nt: NodeType) -> VTok<'a> { vec![NType(nt)] }
 
         tests! {
-            (text, "text()")       => nt(Text, vec![]),
-            (node, "node()")       => nt(Node, vec![]),
-            (comment, "comment()") => nt(Comment, vec![]),
+            (text, "text()")       => nt(Text),
+            (node, "node()")       => nt(Node),
+            (comment, "comment()") => nt(Comment),
             (proc_ins_without_args, "processing-instruction()")
-                => nt(ProcIns, vec![]),
+                => pars(NType(ProcIns), vec![]),
             (proc_ins_with_args, "processing-instruction('hi')")
-                => nt(ProcIns, vec![Literal("hi")])
+                => pars(NType(ProcIns), vec![Literal("hi")])
         }
     }
 

@@ -70,16 +70,12 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum ExpansionState {
     // Finite State Machine(s):
-    /// Transitions: DA => DB => DC => DD => DE => NE
-    DA,
-    DB,
-    DC,
-    DD,
-    DE,
-    /// Transitions: NA => NE
-    NA,
-    NB,
-    NC,
+    /// Transitions: AA => AB => AC => NE
+    AA,
+    AB,
+    AC,
+    /// Transitions: BA => NE
+    BA,
     /// Not expanding
     NE,
 }
@@ -95,15 +91,11 @@ impl ExpansionState {
             // No expansion state:
             NE => None,
             // NA expansion FSM:
-            NA => transition!(NB, NType(Node)),
-            NB => transition!(NC, Const(LeftParen)),
-            NC => transition!(NE, Const(RightParen)),
+            BA => transition!(NE, NType(Node)),
             // DA expansion FSM:
-            DA => transition!(DB, Axis(DescendantOrSelf)),
-            DB => transition!(DC, NType(Node)),
-            DC => transition!(DD, Const(LeftParen)),
-            DD => transition!(DE, Const(RightParen)),
-            DE => transition!(NE, Const(Slash)),
+            AA => transition!(AB, Axis(DescendantOrSelf)),
+            AB => transition!(AC, NType(Node)),
+            AC => transition!(NE, Const(Slash)),
         }
     }
 
@@ -114,9 +106,9 @@ impl ExpansionState {
             *self = $newstate; $ret
         }}; }
         match tok {
-            Const(DoubleSlash) => transition!(DA, Const(Slash)),
-            Const(CurrentNode) => transition!(NA, Axis(SelfAxis)),
-            Const(ParentNode) => transition!(NA, Axis(Parent)),
+            Const(DoubleSlash) => transition!(AA, Const(Slash)),
+            Const(CurrentNode) => transition!(BA, Axis(SelfAxis)),
+            Const(ParentNode) => transition!(BA, Axis(Parent)),
             Const(AtSign) => Axis(Attribute),
             other => other,
         }
@@ -179,20 +171,14 @@ mod tests {
                 => Ok(vec![Axis(Attribute)]),
 
             (double_slash_to_descendant_or_self, vec![Ok(Const(DoubleSlash))])
-                => Ok(vec![
-                        Const(Slash), Axis(DescendantOrSelf),
-                        NType(Node), Const(LeftParen), Const(RightParen),
-                        Const(Slash)]),
+                => Ok(vec![Const(Slash), Axis(DescendantOrSelf),
+                           NType(Node), Const(Slash)]),
 
             (current_node_to_self_node, vec![Ok(Const(CurrentNode))])
-                => Ok(vec![
-                        Axis(SelfAxis),
-                        NType(Node), Const(LeftParen), Const(RightParen)]),
+                => Ok(vec![Axis(SelfAxis), NType(Node)]),
 
             (parent_node_to_parent_node, vec![Ok(Const(ParentNode))])
-                => Ok(vec![
-                        Axis(Parent),
-                        NType(Node), Const(LeftParen), Const(RightParen)])
+                => Ok(vec![Axis(Parent), NType(Node)])
         }
     }
 

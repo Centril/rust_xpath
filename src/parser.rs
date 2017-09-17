@@ -826,12 +826,13 @@ parser!(parse_node_test(i, alloc)
     -> PRONT<<A::Expr as Expr>::P, <A::Expr as Expr>::S>
 {
     failible_map(consume_match!(i, Token::NType), |name| {
-        delim_par(i, alloc, |i, alloc| Ok(Some(match name {
-            NodeType::Text => NodeTest::Text,
-            NodeType::Node => NodeTest::Node,
-            NodeType::Comment => NodeTest::Comment,
-            NodeType::ProcIns => NodeTest::ProcIns(parse_local(i, alloc))
-        })))
+        match name {
+            NodeType::Text => Ok(Some(NodeTest::Text)),
+            NodeType::Node => Ok(Some(NodeTest::Node)),
+            NodeType::Comment => Ok(Some(NodeTest::Comment)),
+            NodeType::ProcIns => delim_par(i, alloc, |i, alloc|
+                Ok(Some(NodeTest::ProcIns(parse_local(i, alloc)))))
+        }
     })
 });
 

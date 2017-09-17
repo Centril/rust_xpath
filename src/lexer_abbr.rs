@@ -35,7 +35,7 @@ where
     state: ContractionState,
     /// Failed contraction that must be immediately flushed out before
     /// anything else.
-    flush: ArrayDeque<[LexerResult<'a>; 5]>,
+    flush: ArrayDeque<[LexerResult<'a>; 3]>,
 }
 
 //============================================================================//
@@ -50,7 +50,7 @@ where
     pub fn new(source: I) -> LexerAbbreviator<'a, I> {
         Self {
             source: source,
-            state:  ContractionState::NC,
+            state:  NC,
             flush:  ArrayDeque::new(),
         }
     }
@@ -87,59 +87,25 @@ where
         &mut self,
         tok: StrToken<'a>,
     ) -> (Option<LexerResult<'a>>, ContractionState) {
-        #![allow(unreachable_patterns)]
         macro_rules! progress {
-            ($newstate: expr, $emit: expr, $against: pat) => {
-                match tok {
-                    $against => ($emit, $newstate),
-                    Const(Slash) => (self.readd_pop(), AA),
-                    Axis(Parent) => (self.readd_pop(), BA),
-                    Axis(SelfAxis) => (self.readd_pop(), CA),
-                    Axis(Attribute) => (self.readd_pop_push(Ok(Const(AtSign))), NC),
-                    _ => (self.readd_pop_push(Ok(tok)), NC)
-                }
-            };
-        }
-        macro_rules! second {
-            ($newstate: expr, $against: pat, $init_state: expr, $init: pat) => {
-                match tok {
-                    $against => (None, $newstate),
-                    $init => (self.readd_pop(), $init_state),
-                    Const(Slash) => (self.readd_pop(), AA),
-                    Axis(Parent) => (self.readd_pop(), BA),
-                    Axis(SelfAxis) => (self.readd_pop(), CA),
-                    Axis(Attribute) => (self.readd_pop_push(Ok(Const(AtSign))), NC),
-                    _ => (self.readd_pop_push(Ok(tok)), NC)
-                }
-                /*
-                if let $against = tok { (None, $newstate) }
-                else if let $init = tok {
-                    (self.readd_pop(), $init_state)
-                }
-                else { (self.readd_pop_push(Ok(tok)), NC) }
-                        //if let $init = tok { $init_state } else { NC }) }
-                */
+            ($newstate: expr, $against: pat, $emit: expr) => {
+                if let $against = tok { return ($emit, $newstate); }
             };
         }
         match self.state {
-            NC => match tok {
-                Const(Slash) => (None, AA),
-                Axis(Parent) => (None, BA),
-                Axis(SelfAxis) => (None, CA),
-                Axis(Attribute) => (Some(Ok(Const(AtSign))), NC),
-                _ => (Some(Ok(tok)), NC),
-            },
-            AA => second!(AB, Axis(DescendantOrSelf), AA, Const(Slash)),
-            AB => progress!(AC, None, NType(Node)),
-            AC => progress!(AD, None, Const(LeftParen)),
-            AD => progress!(AE, None, Const(RightParen)),
-            AE => progress!(NC, Some(Ok(Const(DoubleSlash))), Const(Slash)),
-            BA => second!(BB, NType(Node), BA, Axis(Parent)),
-            BB => progress!(BC, None, Const(LeftParen)),
-            BC => progress!(NC, Some(Ok(Const(ParentNode))), Const(RightParen)),
-            CA => second!(CB, NType(Node), CA, Axis(SelfAxis)),
-            CB => progress!(CC, None, Const(LeftParen)),
-            CC => progress!(NC, Some(Ok(Const(CurrentNode))), Const(RightParen)),
+            NC => {},
+            AA => progress!(AB, Axis(DescendantOrSelf), None),
+            AB => progress!(AC, NType(Node), None),
+            AC => progress!(NC, Const(Slash), Some(Ok(Const(DoubleSlash)))),
+            BA => progress!(NC, NType(Node), Some(Ok(Const(ParentNode)))),
+            CA => progress!(NC, NType(Node), Some(Ok(Const(CurrentNode)))),
+        }
+        match tok {
+            Const(Slash) => (self.readd_pop(), AA),
+            Axis(Parent) => (self.readd_pop(), BA),
+            Axis(SelfAxis) => (self.readd_pop(), CA),
+            Axis(Attribute) => (self.readd_pop_push(Ok(Const(AtSign))), NC),
+            _ => (self.readd_pop_push(Ok(tok)), NC)
         }
     }
 }
@@ -187,25 +153,19 @@ enum ContractionState {
     // Finite State Machine(s):
     /// Not contracting
     NC,
-    /// Transitions: AA => AB => AC => AD => AE => NC
+    /// Transitions: AA => AB => AC => NC
     AA,
     AB,
     AC,
-    AD,
-    AE,
-    /// Transitions: BA, BB, BC => NC
+    /// Transitions: BA => NC
     BA,
-    BB,
-    BC,
-    /// Transitions: CA, CB, CC => NC
+    /// Transitions: CA => NC
     CA,
-    CB,
-    CC,
 }
 
 /// An iterator that contracts in reverse.
 struct ContractionRevIter {
-    state: ArrayVec<[StaticToken; 5]>,
+    state: ArrayVec<[StaticToken; 3]>,
 }
 
 impl Iterator for ContractionRevIter {
@@ -230,16 +190,10 @@ impl IntoIterator for ContractionState {
                 AA => trans_rev!(NC, Const(Slash)),
                 AB => trans_rev!(AA, Axis(DescendantOrSelf)),
                 AC => trans_rev!(AB, NType(Node)),
-                AD => trans_rev!(AC, Const(LeftParen)),
-                AE => trans_rev!(AD, Const(RightParen)),
                 // ParentNode transition chain:
                 BA => trans_rev!(NC, Axis(Parent)),
-                BB => trans_rev!(BA, NType(Node)),
-                BC => trans_rev!(BB, Const(LeftParen)),
                 // CurrentNode transition chain:
                 CA => trans_rev!(NC, Axis(SelfAxis)),
-                CB => trans_rev!(CA, NType(Node)),
-                CC => trans_rev!(CB, Const(LeftParen)),
                 // Not contracting
                 NC => {
                     break;
@@ -272,7 +226,9 @@ mod tests {
                 let tokens: Vec<LexerResult> =
                     orig.into_iter()
                         .map(Token::borrowed)
-                        .filter(|x| *x != Axis(Attribute))
+                        .filter(|x| *x != Axis(Attribute) &&
+                                    *x != Axis(Parent) &&
+                                    *x != Axis(SelfAxis))
                         .map(Ok)
                         .collect_vec();
 
@@ -333,18 +289,10 @@ mod tests {
             (aa, AA) => [Const(Slash)],
             (ab, AB) => [Const(Slash), Axis(DescendantOrSelf)],
             (ac, AC) => [Const(Slash), Axis(DescendantOrSelf), NType(Node)],
-            (ad, AD) => [Const(Slash), Axis(DescendantOrSelf),
-                         NType(Node), Const(LeftParen)],
-            (ae, AE) => [Const(Slash), Axis(DescendantOrSelf),
-                         NType(Node), Const(LeftParen), Const(RightParen)],
             // ParentNode transition chain:
             (ba, BA) => [Axis(Parent)],
-            (bb, BB) => [Axis(Parent), NType(Node)],
-            (bc, BC) => [Axis(Parent), NType(Node), Const(LeftParen)],
             // CurrentNode transition chain:
-            (ca, CA) => [Axis(SelfAxis)],
-            (cb, CB) => [Axis(SelfAxis), NType(Node)],
-            (cc, CC) => [Axis(SelfAxis), NType(Node), Const(LeftParen)]
+            (ca, CA) => [Axis(SelfAxis)]
         }
     }
 }

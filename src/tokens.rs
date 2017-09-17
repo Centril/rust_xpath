@@ -182,9 +182,9 @@ impl ShowAsStr for AxisName {
 impl ShowAsStr for NodeType {
     fn show(&self) -> &str {
         match *self {
-            Text => "text",
-            Node => "node",
-            Comment => "comment",
+            Text => "text()",
+            Node => "node()",
+            Comment => "comment()",
             ProcIns => "processing-instruction",
         }
     }
