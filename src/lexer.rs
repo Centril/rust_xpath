@@ -2,8 +2,6 @@
 // Imports:
 //============================================================================//
 
-use phf;
-
 use nom::*;
 use nom::IResult::*;
 
@@ -182,40 +180,48 @@ macro_rules! lexer {
 // Const tokens:
 //============================================================================//
 
+/// An entry: In => `CToken`.
+type CTokenEntry = (In<'static>, CToken);
+
 /// A map of all single character tokens.
-const SINGLE_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
-    "/" => Slash,
-    "(" => LeftParen,
-    ")" => RightParen,
-    "[" => LeftBracket,
-    "]" => RightBracket,
-    "@" => AtSign,
-    "+" => PlusSign,
-    "-" => MinusSign,
-    "|" => Pipe,
-    "=" => Equal,
-    "<" => LessThan,
-    ">" => GreaterThan,
-    "," => Comma
-};
+static SINGLE_CHAR_TOKENS_ITER: [CTokenEntry; 13] = [
+    ("/", CToken::Slash),
+    ("(", CToken::LeftParen),
+    (")", CToken::RightParen),
+    ("[", CToken::LeftBracket),
+    ("]", CToken::RightBracket),
+    ("@", CToken::AtSign),
+    ("+", CToken::PlusSign),
+    ("-", CToken::MinusSign),
+    ("|", CToken::Pipe),
+    ("=", CToken::Equal),
+    ("<", CToken::LessThan),
+    (">", CToken::GreaterThan),
+    (",", CToken::Comma),
+];
 
 // A map of all two character tokens.
-const TWO_CHAR_TOKENS: phf::Map<In<'static>, CToken> = phf_map! {
-    "<=" => LessThanOrEqual,
-    ">=" => GreaterThanOrEqual,
-    "!=" => NotEqual,
-    "//" => DoubleSlash,
-    ".." => ParentNode,
-};
+static TWO_CHAR_TOKENS_ITER: [CTokenEntry; 5] = [
+    ("<=", CToken::LessThanOrEqual),
+    (">=", CToken::GreaterThanOrEqual),
+    ("!=", CToken::NotEqual),
+    ("//", CToken::DoubleSlash),
+    ("..", CToken::ParentNode),
+];
+
+fn find_in_map<I>(i: In, iter: I) -> OTok<'static>
+where I: IntoIterator<Item = &'static CTokenEntry> {
+    iter.into_iter().find(|&&(m, _)| m == i).map(|&(_, t)| Const(t))
+}
 
 /// Matches the input against any symbol in `SINGLE_CHAR_TOKENS`.
 fn get_single(i: In) -> OTok<'static> {
-    SINGLE_CHAR_TOKENS.get(i).cloned().map(Const)
+    find_in_map(i, &SINGLE_CHAR_TOKENS_ITER)
 }
 
 /// Matches the input against any symbol in `TWO_CHAR_TOKENS`.
 fn get_two(i: In) -> OTok<'static> {
-    TWO_CHAR_TOKENS.get(i).cloned().map(Const)
+    find_in_map(i, &TWO_CHAR_TOKENS_ITER)
 }
 
 /// A lexer matching a single character token.

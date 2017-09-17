@@ -1,5 +1,3 @@
-#![plugin(phf_macros)]
-#![feature(plugin)]
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(inclusive_range_syntax))]
 #![allow(dead_code)]
@@ -19,8 +17,6 @@ extern crate unreachable;
 
 extern crate arraydeque;
 extern crate arrayvec;
-
-extern crate phf;
 
 //============================================================================//
 // Testing crates:
