@@ -67,7 +67,10 @@ where
     I: Iterator<Item = LexerResult<'a>>,
 {
     fn readd_pop(&mut self) -> OLR<'a> {
+        // Not redundant, type checking does not working w/o the closure.
+        #[cfg_attr(feature = "cargo-clippy", allow(redundant_closure))]
         self.flush.extend(self.state.into_iter().map(|s| Ok(s)));
+
         self.flush.pop_front()
     }
 
