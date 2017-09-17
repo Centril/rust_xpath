@@ -89,7 +89,7 @@ pub trait XPathParser<'input> {
 /// This is a bit backwards... Expr should specify its allocator instead.
 /// But since ATCs are not yet implemented, it is not possible.
 /// This will be changed in a future version.
-struct Parser<'alloc, A>
+pub struct Parser<'alloc, A>
 where
     A: Allocator<'alloc> + 'alloc
 {
@@ -134,7 +134,7 @@ impl<'alloc, A> Parser<'alloc, A>
 where
     A: Allocator<'alloc>
 {
-    pub fn parse_iter<'input, I>(&self, source: I) -> ParseResult<A::Expr>
+    pub(crate) fn parse_iter<'input, I>(&self, source: I) -> ParseResult<A::Expr>
     where
         'input: 'alloc,
         I: Iterator<Item = LexerResult<'input>> + 'input + Clone,

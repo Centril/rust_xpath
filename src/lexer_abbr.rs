@@ -60,19 +60,18 @@ where
 // Abbriviator, Internals:
 //============================================================================//
 
+type OLR<'a> = Option<LexerResult<'a>>;
+
 impl<'a, I> LexerAbbreviator<'a, I>
 where
     I: Iterator<Item = LexerResult<'a>>,
 {
-    fn readd_pop(&mut self) -> Option<LexerResult<'a>> {
+    fn readd_pop(&mut self) -> OLR<'a> {
         self.flush.extend(self.state.into_iter().map(|s| Ok(s)));
         self.flush.pop_front()
     }
 
-    fn readd_pop_push(
-        &mut self,
-        push: LexerResult<'a>,
-    ) -> Option<LexerResult<'a>> {
+    fn readd_pop_push(&mut self, push: LexerResult<'a>) -> OLR<'a> {
         match self.readd_pop() {
             None => Some(push),
             Some(retr) => {
@@ -83,29 +82,27 @@ where
         }
     }
 
-    fn try_token(
-        &mut self,
-        tok: StrToken<'a>,
-    ) -> (Option<LexerResult<'a>>, ContractionState) {
-        macro_rules! progress {
-            ($newstate: expr, $against: pat, $emit: expr) => {
-                if let $against = tok { return ($emit, $newstate); }
-            };
-        }
+    fn try_token(&mut self, tok: StrToken<'a>) -> (ContractionState, OLR<'a>) {
         match self.state {
             NC => {},
-            AA => progress!(AB, Axis(DescendantOrSelf), None),
-            AB => progress!(AC, NType(Node), None),
-            AC => progress!(NC, Const(Slash), Some(Ok(Const(DoubleSlash)))),
-            BA => progress!(NC, NType(Node), Some(Ok(Const(ParentNode)))),
-            CA => progress!(NC, NType(Node), Some(Ok(Const(CurrentNode)))),
+            AA => if let Axis(DescendantOrSelf) = tok { return (AB, None); },
+            AB => if let NType(Node) = tok { return (AC, None); }
+            AC => if let Const(Slash) = tok {
+                return (NC, Some(Ok(Const(DoubleSlash))));
+            },
+            BA => if let NType(Node) = tok {
+                return (NC, Some(Ok(Const(ParentNode))));
+            },
+            CA => if let NType(Node) = tok {
+                return (NC, Some(Ok(Const(CurrentNode))));
+            },
         }
         match tok {
-            Const(Slash) => (self.readd_pop(), AA),
-            Axis(Parent) => (self.readd_pop(), BA),
-            Axis(SelfAxis) => (self.readd_pop(), CA),
-            Axis(Attribute) => (self.readd_pop_push(Ok(Const(AtSign))), NC),
-            _ => (self.readd_pop_push(Ok(tok)), NC)
+            Const(Slash) => (AA, self.readd_pop()),
+            Axis(Parent) => (BA, self.readd_pop()),
+            Axis(SelfAxis) => (CA, self.readd_pop()),
+            Axis(Attribute) => (NC, self.readd_pop_push(Ok(Const(AtSign)))),
+            _ => (NC, self.readd_pop_push(Ok(tok)))
         }
     }
 }
@@ -125,9 +122,9 @@ where
         let mut emit_tok = None;
         while let None = emit_tok {
             if let Some(rtok) = self.source.next() {
-                let (emit, newstate) = match rtok {
+                let (newstate, emit) = match rtok {
                     Ok(tok) => self.try_token(tok),
-                    err => (self.readd_pop_push(err), NC)
+                    err => (NC, self.readd_pop_push(err))
                 };
                 emit_tok = emit;
                 self.state = newstate;

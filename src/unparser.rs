@@ -140,12 +140,12 @@ impl expr::NodeTest {
                 pt.push(Token::NType(NodeType::ProcIns));
                 pt.push(Const(CToken::LeftParen));
                 if let Some(lit) = opi.as_ref() {
-                    pt.push(Token::Literal(&lit));
+                    pt.push(Token::Literal(lit));
                 }
                 pt.push(Const(CToken::RightParen));
             },
-            Attribute(ref nt) => nt.walk(pt),
-            Namespace(ref nt) => nt.walk(pt),
+            Attribute(ref nt) |
+            Namespace(ref nt) |
             Element(ref nt) => nt.walk(pt),
         }
     }
@@ -221,16 +221,17 @@ impl ExprB {
             },
             Path(ref start, ref steps) => {
                 start.walk(pt, 9);
+                
                 let mut iter = steps.iter();
 
                 iter.next()
                     .expect("Malformed path, must have >= 1 step")
                     .walk(pt);
 
-                while let Some(step) = iter.next() {
+                iter.foreach(|step| {
                     pt.push(Const(CToken::Slash));
                     step.walk(pt);
-                }
+                });
             },
             Literal(ref lit) => lit.walk(pt),
             ContextNode => {},

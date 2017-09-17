@@ -10,16 +10,15 @@ repository    = "https://github.com/Centril/rust_xpath"
 #documentation = "https://docs.rs/rust_xpath/"
 
 [dependencies]
-nom         = "3.2.0"
-phf         = "0.7.21"
-phf_macros  = "0.7.21"
-quick-error = "1.2.0"
-unreachable = "1.0.0"
-itertools   = "0.6.2"
-arrayvec    = "0.4.1"
-arraydeque  = "0.2.3"
-
-cfg-if = "0.1.2"
+nom         = "3.2.0"  # For lexer.
+phf         = "0.7.21" # For lexer.
+phf_macros  = "0.7.21" # For lexer.
+quick-error = "1.2.0"  # Used in lexer + parser.
+unreachable = "1.0.0"  # For lexer.
+itertools   = "0.6.2"  # Used in various places.
+arrayvec    = "0.4.1"  # Used in lexer_abbr.
+arraydeque  = "0.2.3"  # Used in lexer_abbr
+cfg-if      = "0.1.2"  # Used in lib.rs
 
 [dev-dependencies]
 proptest          = "0.2.1"
