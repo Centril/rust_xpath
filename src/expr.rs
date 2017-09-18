@@ -382,14 +382,14 @@ where
 // Basic types:
 //============================================================================//
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrincipalNodeType {
     Attribute,
     Element,
     Namespace,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Axis {
     Ancestor,
     AncestorOrSelf,
@@ -407,7 +407,7 @@ pub enum Axis {
 }
 
 /// Denotes what binary operator an expression is.
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BinaryOp {
     Or,
     And,
@@ -432,7 +432,7 @@ pub enum BinaryOp {
 /// box the function names when they are special.
 ///
 /// See: https://www.w3.org/TR/xpath/#corelib for more details.
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CoreFunction {
     Last,
     Position,
@@ -632,6 +632,13 @@ impl Axis {
 impl<P: AsRef<str>, S: AsRef<str>> QName<P, S> {
     /// Constructs a new QName.
     pub fn new(prefix: Option<P>, local: S) -> Self { Self { prefix, local } }
+}
+
+impl<P: AsRef<str>, S: AsRef<str>> NameTest<P, S> {
+    /// Constructs a new NameTest.
+    pub fn new(prefix: Option<P>, local: Option<S>) -> Self {
+        Self { prefix, local }
+    }
 }
 
 impl<L> From<f64> for LiteralValue<L>
