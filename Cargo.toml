@@ -11,7 +11,7 @@ repository    = "https://github.com/Centril/rust_xpath"
 
 [dependencies]
 nom         = "3.2.0"  # For lexer.
-quick-error = "1.2.0"  # Used in lexer + parser.
+quick-error = "1.2.1"  # Used in lexer + parser.
 unreachable = "1.0.0"  # For lexer.
 itertools   = "0.6.2"  # Used in various places.
 arrayvec    = "0.4.1"  # Used in lexer_abbr.
@@ -19,4 +19,4 @@ arraydeque  = "0.2.3"  # Used in lexer_abbr
 cfg-if      = "0.1.2"  # Used in lib.rs
 
 [dev-dependencies]
-proptest          = "0.2.1"
+proptest          = "0.3.0"
