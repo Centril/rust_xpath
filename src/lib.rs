@@ -1,5 +1,4 @@
 #![cfg_attr(test, feature(test))]
-#![cfg_attr(test, feature(inclusive_range_syntax))]
 #![allow(dead_code)]
 
 //============================================================================//

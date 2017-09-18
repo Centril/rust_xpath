@@ -218,7 +218,7 @@ mod tests {
 
     mod prop_test {
         use super::*;
-        use test_generators::*;
+        use test_generators::tokens::gen_tokens;
 
         proptest! {
             #[test]

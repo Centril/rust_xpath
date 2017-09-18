@@ -185,7 +185,7 @@ mod tests {
     /// Tests with property based testing... using proptest:
     mod proptest {
         use super::*;
-        use test_generators::*;
+        use test_generators::tokens::gen_tokens;
 
         proptest! {
             #[test]
